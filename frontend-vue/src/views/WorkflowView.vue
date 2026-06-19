@@ -11,7 +11,7 @@
           </div>
         </div>
         <div class="card-body">
-          <el-table :data="workflows" stripe v-loading="loadingList">
+          <el-table :data="paginatedWorkflows" stripe v-loading="loadingList">
             <el-table-column prop="name" label="工作流名称" />
             <el-table-column prop="description" label="描述" show-overflow-tooltip />
             <el-table-column label="节点数" width="80" align="center">
@@ -50,6 +50,16 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="workflows.length > pageSize" style="margin-top:12px;display:flex;justify-content:flex-end">
+            <el-pagination
+              v-model:current-page="currentPage"
+              v-model:page-size="pageSize"
+              :page-sizes="[10, 15, 20, 50]"
+              :total="workflows.length"
+              layout="total, sizes, prev, pager, next"
+              small
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -1133,6 +1143,12 @@ import '@vue-flow/controls/dist/style.css'
 
 const loadingList = ref(false)
 const workflows = ref([])
+const currentPage = ref(1)
+const pageSize = ref(15)
+const paginatedWorkflows = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return workflows.value.slice(start, start + pageSize.value)
+})
 const editing = ref(false)
 const saving = ref(false)
 const currentWf = ref({ name: '', nodes: [], edges: [], status: 'draft' })

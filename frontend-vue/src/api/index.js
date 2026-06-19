@@ -129,6 +129,9 @@ export const getProviders = () => api.get('/llm/providers')
 // 健康检查
 export const healthCheck = () => api.get('/health')
 
+// 工作台数据
+export const getDashboard = () => api.get('/dashboard')
+
 // 智能体
 export const getAgents = () => api.get('/agents')
 export const createAgent = (data) => api.post('/agents', data)

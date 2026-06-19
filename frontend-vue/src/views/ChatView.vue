@@ -400,6 +400,13 @@ const lastAiIndex = computed(() => {
 const systemPrompt = ref('')
 const agentName = ref('')
 
+if (route.query.prompt) {
+  systemPrompt.value = route.query.prompt
+}
+if (route.query.agent) {
+  agentName.value = route.query.agent
+}
+
 onMounted(async () => {
   refreshQuickActions()
   try {

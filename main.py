@@ -525,6 +525,103 @@ async def root():
 async def health_check():
     return {"status": "healthy", "services": {"api": "running"}}
 
+@app.get("/api/v1/dashboard")
+async def get_dashboard():
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    stats = {}
+    try:
+        stats["conversations_today"] = conversations_col.count_documents({"created_at": {"$gte": today_start.isoformat()}})
+        stats["conversations_total"] = conversations_col.count_documents({})
+    except Exception:
+        stats["conversations_today"] = 0
+        stats["conversations_total"] = 0
+
+    try:
+        from workflow_engine import _get_cols
+        wcol, rcol = _get_cols()
+        stats["workflow_runs_today"] = rcol.count_documents({"created_at": {"$gte": today_start.isoformat()}})
+        stats["workflow_runs_total"] = rcol.count_documents({})
+    except Exception:
+        stats["workflow_runs_today"] = 0
+        stats["workflow_runs_total"] = 0
+
+    try:
+        from workflow_engine import _get_cols
+        wcol, _ = _get_cols()
+        stats["workflows_total"] = wcol.count_documents({})
+    except Exception:
+        stats["workflows_total"] = 0
+
+    try:
+        stats["agents_total"] = agents_col.count_documents({})
+    except Exception:
+        stats["agents_total"] = 0
+
+    recent_chats = []
+    try:
+        for doc in conversations_col.find().sort("created_at", -1).limit(10):
+            msgs = doc.get("messages", [])
+            last_msg = msgs[-1].get("content", "") if msgs else ""
+            recent_chats.append({
+                "time": doc.get("created_at", "")[:16].replace("T", " "),
+                "model": doc.get("provider", "unknown"),
+                "message": last_msg[:80],
+                "title": doc.get("title", "")
+            })
+    except Exception:
+        pass
+
+    system_status = []
+    try:
+        mongo_client.admin.command("ping")
+        system_status.append({"name": "MongoDB", "ok": True})
+    except Exception:
+        system_status.append({"name": "MongoDB", "ok": False})
+
+    try:
+        import httpx
+        settings_doc = settings_col.find_one({"_id": "app_settings"}) or {}
+        providers = []
+        provider_map = {
+            "deepseek": ("deepseek_key", "deepseek_url"),
+            "mimo": ("mimo_key", "mimo_url"),
+            "openai": ("openai_key", "openai_url"),
+            "qwen": ("qwen_key", "qwen_url"),
+            "glm": ("glm_key", "glm_url"),
+            "agnes": ("agnes_key", "agnes_url"),
+        }
+        for name, (key_field, url_field) in provider_map.items():
+            api_key = settings_doc.get(key_field, "")
+            base_url = settings_doc.get(url_field, "")
+            available = bool(api_key)
+            providers.append({"name": name, "available": available})
+        system_status.append({"name": "LLM Providers", "ok": any(p["available"] for p in providers)})
+    except Exception:
+        providers = [{"name": n, "available": False} for n in ["deepseek", "mimo", "openai", "qwen", "glm", "agnes"]]
+        system_status.append({"name": "LLM Providers", "ok": False})
+
+    try:
+        today_chats = stats["conversations_today"]
+        today_runs = stats["workflow_runs_today"]
+        total_today = today_chats + today_runs
+        usage = [
+            {"name": "AI 对话", "value": today_chats, "pct": min(100, today_chats * 5) if total_today > 0 else 0},
+            {"name": "工作流", "value": today_runs, "pct": min(100, today_runs * 10) if total_today > 0 else 0},
+        ]
+    except Exception:
+        usage = []
+
+    return {
+        "stats": stats,
+        "recent_chats": recent_chats,
+        "system_status": system_status,
+        "providers": providers,
+        "usage": usage
+    }
+
 @app.post("/api/v1/settings")
 async def save_settings(request: SettingsRequest):
     updates = {}
