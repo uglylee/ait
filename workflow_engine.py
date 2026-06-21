@@ -693,8 +693,9 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
 
     elif ntype == "parallel":
         upstream_results = {}
+        current_node_id = node.get("id", "")
         for k, v in context.items():
-            if k not in ("inputs",) and k != node_id:
+            if k not in ("inputs",) and k != current_node_id:
                 upstream_results[k] = v
         return {"results": upstream_results, "count": len(upstream_results)}
 
@@ -1669,6 +1670,464 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
             else:
                 clean[k] = v
         return {"output": clean}
+
+
+    # ==================== 办公自动化类 ====================
+
+    elif ntype == "approval":
+        approval_result = {"status": "pending", "approver": "", "comment": ""}
+        return {"result": "审批节点已触发", "status": "pending", "note": "需要外部审批系统回调"}
+
+    elif ntype == "email_send":
+        smtp_host = config.get("smtp_host", "smtp.qq.com")
+        smtp_port = int(config.get("smtp_port", 465))
+        smtp_user = config.get("smtp_user", "")
+        smtp_pass = config.get("smtp_pass", "")
+        use_ssl = config.get("use_ssl", True)
+        to_addr = _replace_vars(config.get("to_addr", ""), context)
+        subject = _replace_vars(config.get("subject", ""), context)
+        body = _replace_vars(config.get("body", "{{input}}"), context)
+        is_html = config.get("is_html", False)
+        if not smtp_user or not smtp_pass:
+            return {"error": "未配置 SMTP 账号或密码"}
+        if not to_addr:
+            return {"error": "未配置收件人"}
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        msg = MIMEMultipart()
+        msg["From"] = smtp_user
+        msg["To"] = to_addr
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "html" if is_html else "plain", "utf-8"))
+        try:
+            if use_ssl:
+                server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
+            else:
+                server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
+                server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, to_addr.split(","), msg.as_string())
+            server.quit()
+            return {"result": "邮件已发送", "to": to_addr, "subject": subject}
+        except Exception as e:
+            return {"error": f"发送邮件失败: {str(e)}"}
+
+    elif ntype == "excel_write":
+        file_path = _replace_vars(config.get("file_path", ""), context)
+        data_val = _replace_vars(config.get("data", "{{input}}"), context)
+        sheet_name = config.get("sheet_name", "Sheet1")
+        try:
+            if not file_path:
+                file_path = os.path.join("generated_media", f"report_{int(time.time())}.xlsx")
+            os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+            import openpyxl
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = sheet_name
+            rows = json.loads(data_val) if isinstance(data_val, str) else data_val
+            if isinstance(rows, list) and len(rows) > 0:
+                if isinstance(rows[0], dict):
+                    headers = list(rows[0].keys())
+                    ws.append(headers)
+                    for row in rows:
+                        ws.append([row.get(h, "") for h in headers])
+                elif isinstance(rows[0], list):
+                    for row in rows:
+                        ws.append(row)
+                else:
+                    ws.append([str(r) for r in rows])
+            wb.save(file_path)
+            wb.close()
+            return {"result": "Excel已生成", "path": file_path, "rows": len(rows) if isinstance(rows, list) else 0}
+        except Exception as e:
+            return {"error": f"Excel写入失败: {str(e)}"}
+
+    elif ntype == "chart_gen":
+        data_val = _replace_vars(config.get("data", "{{input}}"), context)
+        chart_type = config.get("chart_type", "bar")
+        title = config.get("title", "Chart")
+        save_path = config.get("save_path", "")
+        try:
+            import time as _time
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
+            rows = json.loads(data_val) if isinstance(data_val, str) else data_val
+            if isinstance(rows, list) and len(rows) > 0:
+                if isinstance(rows[0], dict):
+                    labels = [str(r.get(list(rows[0].keys())[0], i)) for i, r in enumerate(rows)]
+                    values = [float(r.get(list(rows[0].keys())[1], 0)) for r in rows]
+                elif isinstance(rows[0], list):
+                    labels = [str(r[0]) for r in rows]
+                    values = [float(r[1]) if len(r) > 1 else 0 for r in rows]
+                else:
+                    labels = [str(i) for i in range(len(rows))]
+                    values = [float(v) for v in rows]
+            else:
+                return {"error": "数据为空"}
+            fig, ax = plt.subplots(figsize=(10, 6))
+            if chart_type == "bar":
+                ax.bar(labels, values)
+            elif chart_type == "line":
+                ax.plot(labels, values, marker='o')
+            elif chart_type == "pie":
+                ax.pie(values, labels=labels, autopct='%1.1f%%')
+            elif chart_type == "scatter":
+                ax.scatter(range(len(values)), values)
+            else:
+                ax.bar(labels, values)
+            ax.set_title(title)
+            plt.tight_layout()
+            if not save_path:
+                save_path = os.path.join("generated_media", f"chart_{int(_time.time())}.png")
+            os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+            fig.savefig(save_path, dpi=150)
+            plt.close(fig)
+            return {"result": "图表已生成", "path": save_path, "chart_type": chart_type}
+        except ImportError:
+            return {"error": "需要安装 matplotlib: pip install matplotlib"}
+        except Exception as e:
+            return {"error": f"图表生成失败: {str(e)}"}
+
+    elif ntype == "statistics":
+        data_val = _replace_vars(config.get("data", "{{input}}"), context)
+        operation = config.get("operation", "mean")
+        try:
+            rows = json.loads(data_val) if isinstance(data_val, str) else data_val
+            if isinstance(rows, list) and len(rows) > 0:
+                if isinstance(rows[0], dict):
+                    field = config.get("field", list(rows[0].keys())[0])
+                    numbers = [float(r.get(field, 0)) for r in rows if r.get(field) is not None]
+                elif isinstance(rows[0], (list, tuple)):
+                    numbers = [float(r[0]) for r in rows]
+                else:
+                    numbers = [float(r) for r in rows]
+            else:
+                return {"error": "数据为空"}
+            import statistics as stats
+            ops = {
+                "mean": stats.mean, "median": stats.median,
+                "stdev": lambda x: stats.stdev(x) if len(x) > 1 else 0,
+                "variance": lambda x: stats.variance(x) if len(x) > 1 else 0,
+                "min": min, "max": max, "sum": sum, "count": len,
+            }
+            if operation not in ops:
+                return {"error": f"不支持的操作: {operation}"}
+            result = ops[operation](numbers)
+            return {"result": result, "operation": operation, "count": len(numbers)}
+        except Exception as e:
+            return {"error": f"统计计算失败: {str(e)}"}
+
+    elif ntype == "calendar_event":
+        title = _replace_vars(config.get("title", "会议"), context)
+        description = _replace_vars(config.get("description", ""), context)
+        start_time = _replace_vars(config.get("start_time", ""), context)
+        end_time = _replace_vars(config.get("end_time", ""), context)
+        try:
+            import time as _time
+            import datetime as _dt
+            now = _dt.datetime.now()
+            if not start_time:
+                start_time = now.strftime("%Y-%m-%d %H:%M")
+            if not end_time:
+                end_time = (now + _dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+            ics = f"BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nSUMMARY:{title}\nDESCRIPTION:{description}\nDTSTART:{start_time.replace('-','').replace(':','').replace(' ','T')}00\nDTEND:{end_time.replace('-','').replace(':','').replace(' ','T')}00\nEND:VEVENT\nEND:VCALENDAR"
+            save_path = os.path.join("generated_media", f"event_{int(_time.time())}.ics")
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(ics)
+            return {"result": "日历事件已创建", "title": title, "start": start_time, "end": end_time, "ics_path": save_path}
+        except Exception as e:
+            return {"error": f"创建日历事件失败: {str(e)}"}
+
+    elif ntype == "sentiment_analysis":
+        text = _replace_vars(config.get("text", "{{input}}"), context)
+        if not llm_router:
+            return {"error": "LLM router not available"}
+        prompt = f"分析以下文本的情感倾向，只回答一个词：正面/负面/中性\n文本：{text[:2000]}"
+        import asyncio, threading
+        result_container = [None]
+        error_container = [None]
+        def _run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def _call():
+                    r = ""
+                    async for chunk in llm_router.chat_stream([{"role": "user", "content": prompt}], provider=config.get("provider", "agnes")):
+                        if chunk == "[DONE]" or chunk.startswith('{"type": "reasoning"'):
+                            continue
+                        r += chunk
+                    return r
+                result_container[0] = loop.run_until_complete(_call())
+            except Exception as e:
+                error_container[0] = str(e)
+            finally:
+                loop.close()
+        t = threading.Thread(target=_run); t.start(); t.join(timeout=60)
+        if error_container[0]:
+            return {"error": error_container[0]}
+        sentiment = result_container[0].strip()
+        score = 1.0 if "正面" in sentiment else (-1.0 if "负面" in sentiment else 0.0)
+        return {"result": sentiment, "score": score, "text": text[:100]}
+
+    elif ntype == "template_render":
+        template_str = config.get("template", "")
+        data_val = _replace_vars(config.get("data", "{}"), context)
+        try:
+            data = json.loads(data_val) if isinstance(data_val, str) else data_val
+            result = template_str
+            import re
+            for key, value in data.items():
+                result = re.sub(r"\{\{" + re.escape(key) + "\}\}", str(value), result)
+            save_path = config.get("save_path", "")
+            if save_path:
+                save_path = _replace_vars(save_path, context)
+                os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+                with open(save_path, "w", encoding="utf-8") as f:
+                    f.write(result)
+            return {"result": result, "path": save_path or None}
+        except Exception as e:
+            return {"error": f"模板渲染失败: {str(e)}"}
+
+    elif ntype == "ssh_exec":
+        host = _replace_vars(config.get("host", ""), context)
+        username = config.get("username", "")
+        password = config.get("password", "")
+        command = _replace_vars(config.get("command", "{{input}}"), context)
+        port = int(config.get("port", 22))
+        if not host or not command:
+            return {"error": "未配置主机或命令"}
+        try:
+            import paramiko
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(host, port=port, username=username, password=password, timeout=15)
+            stdin, stdout, stderr = client.exec_command(command, timeout=30)
+            out = stdout.read().decode("utf-8", errors="replace")[:5000]
+            err = stderr.read().decode("utf-8", errors="replace")[:2000]
+            client.close()
+            return {"result": out, "stderr": err, "host": host}
+        except ImportError:
+            return {"error": "需要安装 paramiko: pip install paramiko"}
+        except Exception as e:
+            return {"error": f"SSH执行失败: {str(e)}"}
+
+    elif ntype == "log_analyze":
+        file_path = _replace_vars(config.get("file_path", "{{input}}"), context)
+        keyword = config.get("keyword", "ERROR")
+        max_lines = int(config.get("max_lines", 10000))
+        try:
+            if not file_path or not os.path.exists(file_path):
+                return {"error": f"日志文件不存在: {file_path}"}
+            matches = []
+            total_lines = 0
+            keyword_count = 0
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                for i, line in enumerate(f):
+                    if i >= max_lines:
+                        break
+                    total_lines += 1
+                    if keyword.lower() in line.lower():
+                        keyword_count += 1
+                        if len(matches) < 50:
+                            matches.append({"line": i + 1, "content": line.strip()[:200]})
+            return {"result": {"total_lines": total_lines, "keyword": keyword, "matches": keyword_count, "samples": matches}, "count": keyword_count}
+        except Exception as e:
+            return {"error": f"日志分析失败: {str(e)}"}
+
+    elif ntype == "backup":
+        source = _replace_vars(config.get("source", "{{input}}"), context)
+        dest = _replace_vars(config.get("dest", ""), context)
+        try:
+            if not source or not os.path.exists(source):
+                return {"error": f"源路径不存在: {source}"}
+            if not dest:
+                import datetime as _dt
+                dest = os.path.join("generated_media", f"backup_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.zip")
+            os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+            import shutil
+            if os.path.isfile(source):
+                shutil.copy2(source, dest)
+            else:
+                shutil.make_archive(dest.replace(".zip", ""), "zip", source)
+                dest = dest if dest.endswith(".zip") else dest + ".zip"
+            size = os.path.getsize(dest) if os.path.exists(dest) else 0
+            return {"result": "备份完成", "source": source, "dest": dest, "size": size}
+        except Exception as e:
+            return {"error": f"备份失败: {str(e)}"}
+
+    elif ntype == "data_merge":
+        left_key = config.get("left_key", "id")
+        right_key = config.get("right_key", "id")
+        left_data = context.get(config.get("left_var", "left"), [])
+        right_data = context.get(config.get("right_var", "right"), [])
+        if isinstance(left_data, str):
+            try: left_data = json.loads(left_data)
+            except: left_data = []
+        if isinstance(right_data, str):
+            try: right_data = json.loads(right_data)
+            except: right_data = []
+        try:
+            right_map = {}
+            for item in right_data:
+                if isinstance(item, dict):
+                    right_map[str(item.get(right_key, ""))] = item
+            merged = []
+            for item in left_data:
+                if isinstance(item, dict):
+                    r_item = right_map.get(str(item.get(left_key, "")), {})
+                    merged.append({**item, **r_item})
+                else:
+                    merged.append(item)
+            return {"result": merged, "count": len(merged)}
+        except Exception as e:
+            return {"error": f"数据合并失败: {str(e)}"}
+
+    elif ntype == "deduplicate":
+        data_val = context.get(config.get("data_var", "input"), [])
+        dedup_field = config.get("field", "")
+        if isinstance(data_val, str):
+            try: data_val = json.loads(data_val)
+            except: data_val = [data_val]
+        try:
+            seen = set()
+            result = []
+            for item in data_val:
+                key = str(item.get(dedup_field, "")) if isinstance(item, dict) and dedup_field else str(item)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(item)
+            return {"result": result, "count": len(result), "removed": len(data_val) - len(result)}
+        except Exception as e:
+            return {"error": f"去重失败: {str(e)}"}
+
+    elif ntype == "pivot_table":
+        data_val = context.get(config.get("data_var", "input"), [])
+        group_by = config.get("group_by", "")
+        agg_field = config.get("agg_field", "")
+        agg_func = config.get("agg_func", "sum")
+        if isinstance(data_val, str):
+            try: data_val = json.loads(data_val)
+            except: data_val = []
+        try:
+            groups = {}
+            for item in data_val:
+                if isinstance(item, dict):
+                    key = str(item.get(group_by, "default"))
+                    val = float(item.get(agg_field, 0))
+                    groups.setdefault(key, []).append(val)
+            result = []
+            for key, vals in groups.items():
+                agg_val = sum(vals) if agg_func == "sum" else (len(vals) if agg_func == "count" else (max(vals) if agg_func == "max" else (min(vals) if agg_func == "min" else sum(vals)/len(vals))))
+                result.append({group_by: key, f"{agg_func}({agg_field})": agg_val, "count": len(vals)})
+            return {"result": result, "groups": len(result)}
+        except Exception as e:
+            return {"error": f"透视表失败: {str(e)}"}
+
+    elif ntype == "correlation":
+        x_data = context.get(config.get("x_var", "x"), [])
+        y_data = context.get(config.get("y_var", "y"), [])
+        if isinstance(x_data, str):
+            try: x_data = json.loads(x_data)
+            except: x_data = []
+        if isinstance(y_data, str):
+            try: y_data = json.loads(y_data)
+            except: y_data = []
+        try:
+            x = [float(v) for v in x_data]
+            y = [float(v) for v in y_data]
+            if len(x) != len(y) or len(x) < 2:
+                return {"error": "数据长度不一致或不足2个"}
+            import statistics as stats
+            mean_x, mean_y = stats.mean(x), stats.mean(y)
+            cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y)) / (len(x) - 1)
+            std_x, std_y = stats.stdev(x), stats.stdev(y)
+            r = cov / (std_x * std_y) if std_x * std_y != 0 else 0
+            return {"result": r, "correlation": r, "strength": "强" if abs(r) > 0.7 else ("中等" if abs(r) > 0.4 else "弱"), "count": len(x)}
+        except Exception as e:
+            return {"error": f"相关性分析失败: {str(e)}"}
+
+    elif ntype == "docx_read":
+        file_path = _replace_vars(config.get("file_path", "{{input}}"), context)
+        try:
+            if not file_path or not os.path.exists(file_path):
+                return {"error": f"文件不存在: {file_path}"}
+            from docx import Document
+            doc = Document(file_path)
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            return {"result": "\n".join(paragraphs), "paragraphs": len(paragraphs)}
+        except ImportError:
+            return {"error": "需要安装 python-docx: pip install python-docx"}
+        except Exception as e:
+            return {"error": f"读取Word失败: {str(e)}"}
+
+    elif ntype == "docx_write":
+        save_path = _replace_vars(config.get("save_path", ""), context)
+        title = _replace_vars(config.get("title", ""), context)
+        content = _replace_vars(config.get("content", "{{input}}"), context)
+        try:
+            from docx import Document
+            if not save_path:
+                save_path = os.path.join("generated_media", f"doc_{int(time.time())}.docx")
+            os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+            doc = Document()
+            if title:
+                doc.add_heading(title, level=1)
+            for para in content.split("\n"):
+                if para.strip():
+                    doc.add_paragraph(para)
+            doc.save(save_path)
+            return {"result": "Word文档已生成", "path": save_path}
+        except ImportError:
+            return {"error": "需要安装 python-docx: pip install python-docx"}
+        except Exception as e:
+            return {"error": f"生成Word失败: {str(e)}"}
+
+    elif ntype == "encrypt":
+        text = _replace_vars(config.get("text", "{{input}}"), context)
+        action = config.get("action", "encrypt")
+        key = config.get("key", "")
+        try:
+            import time as _time
+            import hashlib, base64
+            if action == "encrypt":
+                if not key:
+                    key = base64.b64encode(os.urandom(32)).decode()
+                h = hashlib.sha256((text + key).encode()).hexdigest()
+                encoded = base64.b64encode(text.encode()).decode()
+                return {"result": encoded, "hash": h, "key": key, "action": "encrypt"}
+            else:
+                result = base64.b64decode(text.encode()).decode()
+                return {"result": result, "action": "decrypt"}
+        except Exception as e:
+            return {"error": f"加密失败: {str(e)}"}
+
+    elif ntype == "jwt_generate":
+        payload_data = _replace_vars(config.get("payload", "{}"), context)
+        secret = config.get("secret", "default-secret")
+        expire_minutes = int(config.get("expire_minutes", 30))
+        try:
+            import hashlib, base64, json as _json
+            payload = json.loads(payload_data) if isinstance(payload_data, str) else payload_data
+            import datetime as _dt
+            payload["exp"] = (_dt.datetime.utcnow() + _dt.timedelta(minutes=expire_minutes)).isoformat()
+            payload["iat"] = _dt.datetime.utcnow().isoformat()
+            header = base64.b64encode(_json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).decode().rstrip("=")
+            body = base64.b64encode(_json.dumps(payload).encode()).decode().rstrip("=")
+            sig = base64.b64encode(hashlib.sha256(f"{header}.{body}.{secret}".encode()).digest()).decode().rstrip("=")
+            token = f"{header}.{body}.{sig}"
+            return {"result": token, "expires_in": expire_minutes}
+        except Exception as e:
+            return {"error": f"JWT生成失败: {str(e)}"}
+
+    elif ntype == "schedule_trigger":
+        schedule_type = config.get("schedule_type", "interval")
+        interval = int(config.get("interval", 60))
+        return {"result": "调度已注册", "type": schedule_type, "interval": interval, "note": "调度触发器已注册，需要外部调度器执行"}
 
     return {"result": "unknown node type"}
 

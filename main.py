@@ -8,10 +8,19 @@ import uvicorn
 import os
 import json
 import uuid
+import threading
+import queue
 
 from orchestrator import Orchestrator
 
 app = FastAPI(title="AI应用通用框架", version="1.0.0")
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    import traceback
+    traceback.print_exc()
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -27,7 +36,7 @@ agents_col = db["agents"]
 settings_col = db["settings"]
 tasks_col = db["tasks"]
 
-# ============ Orchestrator 初始化 ============
+# ============ Orchestrator 初始化 ==============
 
 _orchestrator = None
 
@@ -1892,6 +1901,368 @@ async def delete_version(workflow_id: str, version: int):
     if not ok:
         raise HTTPException(status_code=404, detail="版本不存在")
     return {"status": "ok"}
+
+# ==================== 触发器 ====================
+
+_triggers_col = None
+
+def _get_triggers_col():
+    global _triggers_col
+    if _triggers_col is None:
+        from pymongo import MongoClient
+        MONGO_URL = os.environ.get("MONGODB_URL", "mongodb://ai_mongo:ai_mongo_2024@localhost:27017")
+        client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=3000)
+        _triggers_col = client["ai_framework"]["workflow_triggers"]
+    return _triggers_col
+
+
+@app.get("/api/v1/workflows/{workflow_id}/triggers")
+async def list_triggers(workflow_id: str):
+    col = _get_triggers_col()
+    triggers = list(col.find({"workflow_id": workflow_id}, {"_id": 0}))
+    return {"triggers": triggers}
+
+
+@app.post("/api/v1/workflows/{workflow_id}/triggers")
+async def create_trigger(workflow_id: str, data: dict):
+    col = _get_triggers_col()
+    import uuid
+    trigger = {
+        "id": str(uuid.uuid4()),
+        "workflow_id": workflow_id,
+        "type": data.get("type", "cron"),
+        "config": data.get("config", {}),
+        "enabled": data.get("enabled", True),
+        "created_at": __import__("datetime").datetime.now().isoformat()
+    }
+    col.insert_one(trigger)
+    trigger.pop("_id", None)
+    return trigger
+
+
+@app.delete("/api/v1/workflows/{workflow_id}/triggers/{trigger_id}")
+async def delete_trigger(workflow_id: str, trigger_id: str):
+    col = _get_triggers_col()
+    col.delete_one({"id": trigger_id, "workflow_id": workflow_id})
+    return {"status": "ok"}
+
+
+@app.post("/api/v1/workflows/{workflow_id}/triggers/{trigger_id}/toggle")
+async def toggle_trigger(workflow_id: str, trigger_id: str):
+    col = _get_triggers_col()
+    trigger = col.find_one({"id": trigger_id, "workflow_id": workflow_id})
+    if not trigger:
+        raise HTTPException(status_code=404, detail="触发器不存在")
+    new_enabled = not trigger.get("enabled", True)
+    col.update_one({"id": trigger_id}, {"$set": {"enabled": new_enabled}})
+    return {"enabled": new_enabled}
+
+
+@app.post("/api/v1/workflows/{workflow_id}/trigger/webhook")
+async def webhook_trigger(workflow_id: str, data: dict = {}):
+    from workflow_engine import run_workflow as do_run
+    try:
+        llm = get_llm_router()
+        run = do_run(workflow_id, inputs=data.get("inputs", {}), llm_router=llm)
+        return run.model_dump()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ==================== 执行队列 ====================
+
+_workflow_queue = queue.Queue()
+_queue_worker_running = False
+_max_concurrent = 3
+_running_count = 0
+_queue_lock = threading.Lock()
+
+
+def _queue_worker():
+    global _running_count, _queue_worker_running
+    _queue_worker_running = True
+    while True:
+        try:
+            item = _workflow_queue.get(timeout=60)
+        except queue.Empty:
+            continue
+        if item is None:
+            break
+        with _queue_lock:
+            while _running_count >= _max_concurrent:
+                _queue_lock.release()
+                __import__("time").sleep(1)
+                _queue_lock.acquire()
+            _running_count += 1
+        try:
+            wf_id = item["workflow_id"]
+            inputs = item.get("inputs", {})
+            from workflow_engine import run_workflow as do_run
+            llm = get_llm_router()
+            run = do_run(wf_id, inputs=inputs, llm_router=llm)
+            item["result"] = run.model_dump()
+            item["status"] = "completed"
+        except Exception as e:
+            item["result"] = {"error": str(e)}
+            item["status"] = "failed"
+        finally:
+            with _queue_lock:
+                _running_count -= 1
+            item["event"].set()
+
+
+# 启动队列工作线程
+_queue_thread = threading.Thread(target=_queue_worker, daemon=True)
+_queue_thread.start()
+
+
+@app.post("/api/v1/workflows/{workflow_id}/queue")
+async def queue_workflow(workflow_id: str, data: dict = {}):
+    import uuid
+    item = {
+        "id": str(uuid.uuid4()),
+        "workflow_id": workflow_id,
+        "inputs": data.get("inputs", {}),
+        "priority": data.get("priority", "normal"),
+        "status": "queued",
+        "created_at": __import__("datetime").datetime.now().isoformat(),
+        "result": None,
+        "event": threading.Event()
+    }
+    _workflow_queue.put(item)
+    item_no_event = {k: v for k, v in item.items() if k != "event"}
+    return item_no_event
+
+
+@app.get("/api/v1/workflow-queue/status")
+async def queue_status():
+    return {
+        "queue_size": _workflow_queue.qsize(),
+        "running": _running_count,
+        "max_concurrent": _max_concurrent
+    }
+
+
+@app.post("/api/v1/workflow-queue/config")
+async def queue_config(data: dict):
+    global _max_concurrent
+    _max_concurrent = data.get("max_concurrent", 3)
+    return {"max_concurrent": _max_concurrent}
+
+
+# ==================== 工作流变量 API ====================
+
+@app.put("/api/v1/workflows/{workflow_id}/variables")
+async def save_variables(workflow_id: str, data: dict):
+    from workflow_engine import get_workflow, update_workflow
+    wf = get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+    variables = data.get("variables", [])
+    update_workflow(workflow_id, {"variables": variables})
+    return {"status": "ok"}
+
+
+# ==================== AI创建工作流 ====================
+
+@app.post("/api/v1/workflows/ai-generate")
+async def ai_generate_workflow(data: dict):
+    description = data.get("description", "")
+    if not description:
+        raise HTTPException(status_code=400, detail="请提供工作流描述")
+
+    try:
+        from llm_config import get_llm_router
+        llm = get_llm_router()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM配置加载失败: {e}")
+
+    prompt = f"""你是一个工作流设计专家。根据用户描述生成工作流JSON。
+
+可用节点类型:
+- start: 输入节点(起点)
+- output: 输出节点(终点)
+- llm: LLM调用(config: provider, prompt)
+- tool: 工具调用(config: tool_name, input_template, method, url, headers, body, timeout, pattern, file_path, encoding, max_size, smtp_host, smtp_port, smtp_user, smtp_pass, to_addr, subject, write_mode, content, ocr_source, top_k)
+- condition: 条件分支(config: condition, operator, value; handles: true, false)
+- switch: 多分支(config: switch_var, cases, default_case)
+- loop: 循环(config: list_var)
+- parallel: 并行(config: empty_config)
+- delay: 延时(config: seconds)
+- retry: 重试(config: max_retries, delay)
+- error_handler: 错误处理(config: fallback_output)
+- csv_parse: CSV解析(config: delimiter, has_header, input_template)
+- data_filter: 数据过滤(config: data_var, field, operator, value)
+- data_sort: 数据排序(config: data_var, sort_field, reverse)
+- data_merge: 数据合并(config: left_var, right_var, left_key, right_key)
+- deduplicate: 去重(config: data_var, field)
+- pivot_table: 透视表(config: data_var, group_by, agg_field, agg_func)
+- correlation: 相关性(config: x_var, y_var)
+- statistics: 统计(config: data, field, operation)
+- chart_gen: 图表(config: data, chart_type[bar/line/pie/scatter], title)
+- excel_write: Excel写入(config: file_path, data, sheet_name)
+- excel_read: Excel读取(config: input_template, sheet_name)
+- docx_write: Word写入(config: save_path, title, content)
+- docx_read: Word读取(config: file_path)
+- pdf_generate: PDF生成(config: input_template, title)
+- text_split: 文本分割(config: delimiter, text)
+- text_translate: 翻译(config: text, target_lang)
+- text_summarize: 摘要(config: input_template, max_length)
+- log_analyze: 日志分析(config: file_path, keyword, max_lines)
+- backup: 备份(config: source, dest)
+- code_exec: 代码执行(config: language, code, timeout)
+- json_build: JSON构建(config: fields)
+- hash_encode: 哈希(config: algorithm, input_template)
+- datetime: 日期时间(config: action[now/timestamp], format)
+- encrypt: 加密(config: text, action[encrypt/decrypt], key)
+- calendar_event: 日历(config: title, description, start_time, end_time)
+- template_render: 模板(config: template, data, save_path)
+- sentiment_analysis: 情感分析(config: text, provider)
+- approval: 审批(config: timeout)
+- ssh_exec: SSH(config: host, port, username, password, command)
+- database: 数据库(config: db_type, connection_string, db_name, collection, query)
+- file_operation: 文件操作(config: operation[read/write/copy/move/delete/list], path, content, dest, encoding)
+- image_gen: 图像生成(config: prompt, size, model)
+- markdown_html: Markdown转HTML(config: input_template)
+- regex_replace: 正则替换(config: pattern, replacement, input_template)
+- math_calc: 数学计算(config: expression)
+- uuid_generate: UUID(config: version, count)
+- notify: 通知(config: notify_type, webhook_url, content, title)
+
+规则:
+1. 必须有且只有一个start节点和一个output节点
+2. 每个节点必须有id(简短如n1,n2), type, label(中文), position{{x,y}}, config
+3. 边必须有id, source, target
+4. 用 {{{{节点id.字段}}}} 引用上游输出，如 {{{{n1.result}}}}, {{{{s1.input}}}}
+5. 只输出JSON，不要其他文字
+
+用户描述: {description}
+
+输出JSON:"""
+
+    try:
+        r = ""
+        async for chunk in llm.chat_stream([{"role": "user", "content": prompt}], provider="agnes", max_tokens=8192, enable_thinking=False):
+            if chunk == "[DONE]" or (isinstance(chunk, str) and chunk.startswith('{"type": "reasoning"')):
+                continue
+            r += chunk
+        raw = r.strip()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"AI生成失败: {e}")
+
+    if not raw:
+        raise HTTPException(status_code=500, detail="AI生成失败: LLM返回空内容，请检查API密钥配置")
+
+    try:
+        if "```json" in raw:
+            raw = raw.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw:
+            raw = raw.split("```")[1].split("```")[0].strip()
+        wf_data = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail=f"AI返回格式错误: {raw[:200]}")
+
+    from workflow_engine import create_workflow
+    result = create_workflow({
+        "name": wf_data.get("name", "AI生成的工作流"),
+        "description": description,
+        "nodes": wf_data.get("nodes", []),
+        "edges": wf_data.get("edges", [])
+    })
+    return result
+
+
+# ==================== 节点配置推荐 ====================
+
+@app.get("/api/v1/workflows/{workflow_id}/suggest-config/{node_id}")
+async def suggest_config(workflow_id: str, node_id: str):
+    from workflow_engine import get_workflow
+    wf = get_workflow(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    nodes = wf.get("nodes", [])
+    edges = wf.get("edges", [])
+    node = next((n for n in nodes if n["id"] == node_id), None)
+    if not node:
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    # Find upstream nodes
+    upstream_ids = [e["source"] for e in edges if e["target"] == node_id]
+    upstream_nodes = [n for n in nodes if n["id"] in upstream_ids]
+
+    suggestions = {}
+    ntype = node.get("type", "")
+
+    if ntype == "llm":
+        uid = upstream_nodes[0]['id'] if upstream_nodes else 'input'
+        suggestions["prompt"] = "处理以下输入:\n{{" + uid + ".result}}"
+        suggestions["provider"] = "agnes"
+
+    elif ntype == "chart_gen":
+        suggestions["chart_type"] = "bar"
+        uid = upstream_nodes[0]['id'] if upstream_nodes else 'input'
+        suggestions["data"] = "{{" + uid + ".result}}"
+        suggestions["title"] = node.get("label", "Chart")
+
+    elif ntype == "statistics":
+        suggestions["data"] = ("{{" + upstream_nodes[0]["id"] + ".result}}" if upstream_nodes else "")
+        suggestions["operation"] = "mean"
+
+    elif ntype == "text_translate":
+        suggestions["text"] = ("{{" + upstream_nodes[0]["id"] + ".result}}" if upstream_nodes else "")
+        suggestions["target_lang"] = "English"
+
+    elif ntype == "text_summarize":
+        suggestions["input_template"] = ("{{" + upstream_nodes[0]["id"] + ".result}}" if upstream_nodes else "")
+        suggestions["max_length"] = 200
+
+    elif ntype == "pdf_generate":
+        suggestions["input_template"] = ("{{" + upstream_nodes[0]["id"] + ".result}}" if upstream_nodes else "")
+        suggestions["title"] = node.get("label", "Document")
+
+    elif ntype == "docx_write":
+        suggestions["content"] = ("{{" + upstream_nodes[0]["id"] + ".result}}" if upstream_nodes else "")
+        suggestions["title"] = node.get("label", "Document")
+
+    elif ntype == "json_build":
+        if upstream_nodes:
+            suggestions["fields"] = json.dumps({upstream_nodes[0]["id"]: "{{" + upstream_nodes[0]["id"] + ".result}}"})
+
+    elif ntype == "condition":
+        suggestions["condition"] = (upstream_nodes[0]["id"] + ".result" if upstream_nodes else "")
+
+    elif ntype == "tool":
+        suggestions["tool_name"] = "http"
+        suggestions["method"] = "GET"
+        suggestions["input_template"] = ("{{" + upstream_nodes[0]["id"] + ".result}}" if upstream_nodes else "")
+
+    elif ntype == "hash_encode":
+        suggestions["algorithm"] = "md5"
+        suggestions["input_template"] = ("{{" + upstream_nodes[0]["id"] + ".result}}" if upstream_nodes else "")
+
+    elif ntype == "code_exec":
+        suggestions["language"] = "python"
+        suggestions["code"] = "print('hello')"
+
+    return {"suggestions": suggestions, "upstream": [{"id": n["id"], "label": n.get("label", ""), "type": n["type"]} for n in upstream_nodes]}
+
+
+
+@app.get("/api/v1/workflow-templates")
+async def list_templates():
+    templates = [
+        {"category": "运维", "name": "系统巡检日报", "desc": "执行命令+日志分析+LLM报告+PDF", "nodes": 9},
+        {"category": "运维", "name": "服务健康监控", "desc": "Ping+HTTP+日志+条件+告警", "nodes": 8},
+        {"category": "运维", "name": "日志智能分析", "desc": "扫描+正则+统计+LLM+Word+PDF", "nodes": 8},
+        {"category": "数据", "name": "CSV数据分析", "desc": "解析+过滤+排序+统计+图表", "nodes": 6},
+        {"category": "办公", "name": "周报生成器", "desc": "分割+LLM润色+PDF+HTML", "nodes": 7},
+        {"category": "AI", "name": "RAG知识问答", "desc": "知识库+LLM+摘要+UUID+JSON", "nodes": 8},
+    ]
+    return {"templates": templates}
+
 
 @app.get("/api/v1/workflow-runs/{run_id}")
 async def get_workflow_run(run_id: str):

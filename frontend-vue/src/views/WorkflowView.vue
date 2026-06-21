@@ -7,11 +7,17 @@
           <h3>AI 工作流</h3>
           <div>
             <el-button size="small" @click="showImportDialog">导入</el-button>
+            <el-button size="small" type="warning" @click="showTemplateDialog = true">模板库</el-button>
+            <el-button size="small" type="success" @click="showAiDialog = true">AI创建</el-button>
+            <el-button size="small" :type="batchMode ? 'danger' : ''" @click="toggleBatchMode">{{ batchMode ? '取消' : '批量操作' }}</el-button>
+            <el-button v-if="batchMode" size="small" type="danger" @click="batchDelete" :disabled="selectedWorkflows.length === 0">删除({{ selectedWorkflows.length }})</el-button>
+            <el-button v-if="batchMode" size="small" type="success" @click="batchExport" :disabled="selectedWorkflows.length === 0">导出({{ selectedWorkflows.length }})</el-button>
             <el-button type="primary" size="small" @click="createNew">新建工作流</el-button>
           </div>
         </div>
         <div class="card-body">
-          <el-table :data="paginatedWorkflows" stripe v-loading="loadingList">
+          <el-table :data="paginatedWorkflows" stripe v-loading="loadingList" @selection-change="(val) => selectedWorkflows = val">
+            <el-table-column v-if="batchMode" type="selection" width="40" />
             <el-table-column prop="name" label="工作流名称" />
             <el-table-column prop="description" label="描述" show-overflow-tooltip />
             <el-table-column label="节点数" width="80" align="center">
@@ -83,14 +89,20 @@
         <!-- 左侧节点面板 -->
         <div class="node-panel">
           <div class="panel-title">节点类型</div>
-          <div v-for="nt in nodeTypes" :key="nt.type" class="node-item" draggable="true" @dragstart="onDragStart($event, nt.type)">
-            <span class="node-icon" :style="{ background: nt.color }">{{ nt.icon }}</span>
-            <span>{{ nt.label }}</span>
+          <input v-model="nodeSearchQuery" placeholder="搜索节点..." class="node-search-input" />
+          <div class="node-category-bar">
+            <span v-for="cat in nodeCategories" :key="cat.value" class="node-cat-tag" :class="{ active: nodeCategory === cat.value }" @click="nodeCategory = cat.value">{{ cat.label }}</span>
+          </div>
+          <div class="node-list-scroll">
+            <div v-for="nt in filteredNodeTypes" :key="nt.type" class="node-item" draggable="true" @dragstart="onDragStart($event, nt.type)">
+              <span class="node-icon" :style="{ background: nt.color }">{{ nt.icon }}</span>
+              <span>{{ nt.label }}</span>
+            </div>
           </div>
         </div>
         <!-- 画布 -->
         <div class="canvas-wrap" ref="canvasRef" @drop="onDrop" @dragover.prevent>
-          <VueFlow v-model:nodes="nodes" v-model:edges="edges" fit-view-on-init :default-edge-options="{ type: 'smoothstep', animated: true }" :edges-updatable="true" :edges-focusable="true">
+          <VueFlow v-model:nodes="nodes" v-model:edges="edges" fit-view-on-init :default-edge-options="{ type: 'smoothstep', animated: true }" :edges-updatable="true" :edges-focusable="true" @node-click="handleNodeClick" @pane-click="handlePaneClick">
             <Background />
             <MiniMap />
             <Controls />
@@ -231,6 +243,67 @@
             </template>
             <template #node-json_diff="nodeProps">
               <div class="custom-node json-diff-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">🔍</span><span class="cn-label">{{ nodeProps.data?.label || 'JSON对比' }}</span></div>
+            </template>
+
+            <template #node-approval="nodeProps">
+              <div class="custom-node approval-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">✅</span><span class="cn-label">{{ nodeProps.data?.label || '审批' }}</span></div>
+            </template>
+            <template #node-email_send="nodeProps">
+              <div class="custom-node email-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📧</span><span class="cn-label">{{ nodeProps.data?.label || '邮件' }}</span></div>
+            </template>
+            <template #node-excel_write="nodeProps">
+              <div class="custom-node excel-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📗</span><span class="cn-label">{{ nodeProps.data?.label || 'Excel' }}</span></div>
+            </template>
+            <template #node-chart_gen="nodeProps">
+              <div class="custom-node chart-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📊</span><span class="cn-label">{{ nodeProps.data?.label || '图表' }}</span></div>
+            </template>
+            <template #node-statistics="nodeProps">
+              <div class="custom-node stats-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📈</span><span class="cn-label">{{ nodeProps.data?.label || '统计' }}</span></div>
+            </template>
+            <template #node-calendar_event="nodeProps">
+              <div class="custom-node calendar-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📅</span><span class="cn-label">{{ nodeProps.data?.label || '日历' }}</span></div>
+            </template>
+            <template #node-sentiment_analysis="nodeProps">
+              <div class="custom-node sentiment-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">💭</span><span class="cn-label">{{ nodeProps.data?.label || '情感分析' }}</span></div>
+            </template>
+            <template #node-template_render="nodeProps">
+              <div class="custom-node template-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📝</span><span class="cn-label">{{ nodeProps.data?.label || '模板' }}</span></div>
+            </template>
+            <template #node-ssh_exec="nodeProps">
+              <div class="custom-node ssh-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">🖥️</span><span class="cn-label">{{ nodeProps.data?.label || 'SSH' }}</span></div>
+            </template>
+            <template #node-log_analyze="nodeProps">
+              <div class="custom-node log-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📋</span><span class="cn-label">{{ nodeProps.data?.label || '日志分析' }}</span></div>
+            </template>
+            <template #node-backup="nodeProps">
+              <div class="custom-node backup-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">💾</span><span class="cn-label">{{ nodeProps.data?.label || '备份' }}</span></div>
+            </template>
+            <template #node-data_merge="nodeProps">
+              <div class="custom-node merge-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">🔗</span><span class="cn-label">{{ nodeProps.data?.label || '数据合并' }}</span></div>
+            </template>
+            <template #node-deduplicate="nodeProps">
+              <div class="custom-node dedup-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">✂️</span><span class="cn-label">{{ nodeProps.data?.label || '去重' }}</span></div>
+            </template>
+            <template #node-pivot_table="nodeProps">
+              <div class="custom-node pivot-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📊</span><span class="cn-label">{{ nodeProps.data?.label || '透视表' }}</span></div>
+            </template>
+            <template #node-correlation="nodeProps">
+              <div class="custom-node corr-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📉</span><span class="cn-label">{{ nodeProps.data?.label || '相关性' }}</span></div>
+            </template>
+            <template #node-docx_read="nodeProps">
+              <div class="custom-node docx-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📄</span><span class="cn-label">{{ nodeProps.data?.label || 'Word读' }}</span></div>
+            </template>
+            <template #node-docx_write="nodeProps">
+              <div class="custom-node docx-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">📝</span><span class="cn-label">{{ nodeProps.data?.label || 'Word写' }}</span></div>
+            </template>
+            <template #node-encrypt="nodeProps">
+              <div class="custom-node encrypt-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">🔒</span><span class="cn-label">{{ nodeProps.data?.label || '加密' }}</span></div>
+            </template>
+            <template #node-jwt_generate="nodeProps">
+              <div class="custom-node jwt-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">🔑</span><span class="cn-label">{{ nodeProps.data?.label || 'JWT' }}</span></div>
+            </template>
+            <template #node-schedule_trigger="nodeProps">
+              <div class="custom-node schedule-node"><Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" /><span class="cn-icon">⏰</span><span class="cn-label">{{ nodeProps.data?.label || '定时' }}</span></div>
             </template>
           </VueFlow>
         </div>
@@ -693,8 +766,13 @@
             </template>
             <!-- Sub Workflow 配置 -->
             <template v-if="selectedNode.type === 'sub_workflow'">
-              <el-form-item label="子工作流 ID">
-                <el-input v-model="selectedNode.data.config.workflow_id" placeholder="email-demo-001" />
+              <el-form-item label="选择子工作流">
+                <el-select v-model="selectedNode.data.config.workflow_id" filterable placeholder="搜索并选择工作流" style="width:100%" @focus="fetchSubWorkflows">
+                  <el-option v-for="wf in availableSubWorkflows" :key="wf.id || wf._id" :label="wf.name" :value="wf.id || wf._id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="已选" v-if="selectedNode.data.config.workflow_id">
+                <el-tag size="small" type="info">{{ getWorkflowName(selectedNode.data.config.workflow_id) }}</el-tag>
               </el-form-item>
               <el-form-item label="输入参数 (JSON)">
                 <el-input v-model="selectedNode.data.config.inputs_map" type="textarea" :rows="3" placeholder='{"input": "{{input}}"}' />
@@ -1015,24 +1093,415 @@
                 <el-input v-model="selectedNode.data.config.compare_value" type="textarea" :rows="3" placeholder="{{变量名}}" />
               </el-form-item>
             </template>
+            <template v-if="selectedNode.type === 'approval'">
+              <el-form-item label="审批超时(秒)">
+                <el-input-number v-model="selectedNode.data.config.timeout" :min="10" :max="3600" style="width:100%" />
+              </el-form-item>
+              <el-form-item label="审批回调URL">
+                <el-input v-model="selectedNode.data.config.check_url" placeholder="http://..." />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'email_send'">
+              <el-form-item label="SMTP服务器">
+                <el-input v-model="selectedNode.data.config.smtp_host" placeholder="smtp.qq.com" />
+              </el-form-item>
+              <el-form-item label="SMTP端口">
+                <el-input-number v-model="selectedNode.data.config.smtp_port" :min="1" :max="65535" style="width:100%" />
+              </el-form-item>
+              <el-form-item label="发件人邮箱">
+                <el-input v-model="selectedNode.data.config.smtp_user" placeholder="your@qq.com" />
+              </el-form-item>
+              <el-form-item label="授权码">
+                <el-input v-model="selectedNode.data.config.smtp_pass" type="password" show-password placeholder="SMTP授权码" />
+              </el-form-item>
+              <el-form-item label="收件人">
+                <el-input v-model="selectedNode.data.config.to_addr" placeholder="recipient@example.com" />
+              </el-form-item>
+              <el-form-item label="邮件主题">
+                <el-input v-model="selectedNode.data.config.subject" placeholder="用 {{变量名}} 引用" />
+              </el-form-item>
+              <el-form-item label="邮件内容">
+                <el-input v-model="selectedNode.data.config.body" type="textarea" :rows="4" placeholder="{{变量名}}" />
+              </el-form-item>
+              <el-form-item label="HTML格式">
+                <el-switch v-model="selectedNode.data.config.is_html" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'excel_write'">
+              <el-form-item label="文件路径">
+                <el-input v-model="selectedNode.data.config.file_path" placeholder="C:\report.xlsx 或 {{变量名}}" />
+              </el-form-item>
+              <el-form-item label="数据源">
+                <el-input v-model="selectedNode.data.config.data" type="textarea" :rows="3" placeholder="{{变量名}} 或 JSON数组" />
+              </el-form-item>
+              <el-form-item label="Sheet名称">
+                <el-input v-model="selectedNode.data.config.sheet_name" placeholder="Sheet1" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'chart_gen'">
+              <el-form-item label="数据源">
+                <el-input v-model="selectedNode.data.config.data" type="textarea" :rows="3" placeholder="{{变量名}} 或 JSON数组" />
+              </el-form-item>
+              <el-form-item label="图表类型">
+                <el-select v-model="selectedNode.data.config.chart_type" style="width:100%">
+                  <el-option label="柱状图" value="bar" />
+                  <el-option label="折线图" value="line" />
+                  <el-option label="饼图" value="pie" />
+                  <el-option label="散点图" value="scatter" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="标题">
+                <el-input v-model="selectedNode.data.config.title" placeholder="图表标题" />
+              </el-form-item>
+              <el-form-item label="保存路径">
+                <el-input v-model="selectedNode.data.config.save_path" placeholder="自动生成" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'statistics'">
+              <el-form-item label="数据源">
+                <el-input v-model="selectedNode.data.config.data" type="textarea" :rows="3" placeholder="{{变量名}} 或 JSON数组" />
+              </el-form-item>
+              <el-form-item label="字段名">
+                <el-input v-model="selectedNode.data.config.field" placeholder="amount" />
+              </el-form-item>
+              <el-form-item label="统计操作">
+                <el-select v-model="selectedNode.data.config.operation" style="width:100%">
+                  <el-option label="均值 (mean)" value="mean" />
+                  <el-option label="中位数 (median)" value="median" />
+                  <el-option label="标准差 (stdev)" value="stdev" />
+                  <el-option label="方差 (variance)" value="variance" />
+                  <el-option label="最小值 (min)" value="min" />
+                  <el-option label="最大值 (max)" value="max" />
+                  <el-option label="求和 (sum)" value="sum" />
+                  <el-option label="计数 (count)" value="count" />
+                </el-select>
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'calendar_event'">
+              <el-form-item label="事件标题">
+                <el-input v-model="selectedNode.data.config.title" placeholder="会议" />
+              </el-form-item>
+              <el-form-item label="描述">
+                <el-input v-model="selectedNode.data.config.description" placeholder="事件描述" />
+              </el-form-item>
+              <el-form-item label="开始时间">
+                <el-input v-model="selectedNode.data.config.start_time" placeholder="2026-06-25 10:00" />
+              </el-form-item>
+              <el-form-item label="结束时间">
+                <el-input v-model="selectedNode.data.config.end_time" placeholder="2026-06-25 11:00" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'sentiment_analysis'">
+              <el-form-item label="文本">
+                <el-input v-model="selectedNode.data.config.text" type="textarea" :rows="3" placeholder="{{变量名}}" />
+              </el-form-item>
+              <el-form-item label="LLM Provider">
+                <el-select v-model="selectedNode.data.config.provider" style="width:100%">
+                  <el-option label="agnes" value="agnes" />
+                  <el-option label="deepseek" value="deepseek" />
+                  <el-option label="openai" value="openai" />
+                </el-select>
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'template_render'">
+              <el-form-item label="模板内容">
+                <el-input v-model="selectedNode.data.config.template" type="textarea" :rows="5" placeholder="甲方: {{party_a}}&#10;乙方: {{party_b}}" />
+              </el-form-item>
+              <el-form-item label="数据 (JSON)">
+                <el-input v-model="selectedNode.data.config.data" type="textarea" :rows="3" placeholder='{"party_a": "张三", "party_b": "李四"}' />
+              </el-form-item>
+              <el-form-item label="保存路径">
+                <el-input v-model="selectedNode.data.config.save_path" placeholder="可选，自动生成" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'ssh_exec'">
+              <el-form-item label="主机地址">
+                <el-input v-model="selectedNode.data.config.host" placeholder="192.168.1.100" />
+              </el-form-item>
+              <el-form-item label="端口">
+                <el-input-number v-model="selectedNode.data.config.port" :min="1" :max="65535" style="width:100%" />
+              </el-form-item>
+              <el-form-item label="用户名">
+                <el-input v-model="selectedNode.data.config.username" placeholder="root" />
+              </el-form-item>
+              <el-form-item label="密码">
+                <el-input v-model="selectedNode.data.config.password" type="password" show-password />
+              </el-form-item>
+              <el-form-item label="执行命令">
+                <el-input v-model="selectedNode.data.config.command" type="textarea" :rows="2" placeholder="ls -la 或 {{变量名}}" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'log_analyze'">
+              <el-form-item label="日志文件路径">
+                <el-input v-model="selectedNode.data.config.file_path" placeholder="C:\app.log 或 {{变量名}}" />
+              </el-form-item>
+              <el-form-item label="关键词">
+                <el-input v-model="selectedNode.data.config.keyword" placeholder="ERROR" />
+              </el-form-item>
+              <el-form-item label="最大扫描行数">
+                <el-input-number v-model="selectedNode.data.config.max_lines" :min="100" :max="100000" style="width:100%" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'backup'">
+              <el-form-item label="源路径">
+                <el-input v-model="selectedNode.data.config.source" placeholder="C:\data 或 {{变量名}}" />
+              </el-form-item>
+              <el-form-item label="目标路径">
+                <el-input v-model="selectedNode.data.config.dest" placeholder="自动生成" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'data_merge'">
+              <el-form-item label="左数据变量">
+                <el-input v-model="selectedNode.data.config.left_var" placeholder="left" />
+              </el-form-item>
+              <el-form-item label="右数据变量">
+                <el-input v-model="selectedNode.data.config.right_var" placeholder="right" />
+              </el-form-item>
+              <el-form-item label="左键名">
+                <el-input v-model="selectedNode.data.config.left_key" placeholder="id" />
+              </el-form-item>
+              <el-form-item label="右键名">
+                <el-input v-model="selectedNode.data.config.right_key" placeholder="id" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'deduplicate'">
+              <el-form-item label="数据变量">
+                <el-input v-model="selectedNode.data.config.data_var" placeholder="input" />
+              </el-form-item>
+              <el-form-item label="去重字段">
+                <el-input v-model="selectedNode.data.config.field" placeholder="留空则按整条去重" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'pivot_table'">
+              <el-form-item label="数据变量">
+                <el-input v-model="selectedNode.data.config.data_var" placeholder="input" />
+              </el-form-item>
+              <el-form-item label="分组字段">
+                <el-input v-model="selectedNode.data.config.group_by" placeholder="region" />
+              </el-form-item>
+              <el-form-item label="聚合字段">
+                <el-input v-model="selectedNode.data.config.agg_field" placeholder="amount" />
+              </el-form-item>
+              <el-form-item label="聚合函数">
+                <el-select v-model="selectedNode.data.config.agg_func" style="width:100%">
+                  <el-option label="求和 (sum)" value="sum" />
+                  <el-option label="计数 (count)" value="count" />
+                  <el-option label="平均值 (avg)" value="avg" />
+                  <el-option label="最大值 (max)" value="max" />
+                  <el-option label="最小值 (min)" value="min" />
+                </el-select>
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'correlation'">
+              <el-form-item label="X数据变量">
+                <el-input v-model="selectedNode.data.config.x_var" placeholder="x" />
+              </el-form-item>
+              <el-form-item label="Y数据变量">
+                <el-input v-model="selectedNode.data.config.y_var" placeholder="y" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'docx_read'">
+              <el-form-item label="文件路径">
+                <el-input v-model="selectedNode.data.config.file_path" placeholder="C:\doc.docx 或 {{变量名}}" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'docx_write'">
+              <el-form-item label="保存路径">
+                <el-input v-model="selectedNode.data.config.save_path" placeholder="自动生成" />
+              </el-form-item>
+              <el-form-item label="文档标题">
+                <el-input v-model="selectedNode.data.config.title" placeholder="文档标题" />
+              </el-form-item>
+              <el-form-item label="文档内容">
+                <el-input v-model="selectedNode.data.config.content" type="textarea" :rows="5" placeholder="{{变量名}}" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'encrypt'">
+              <el-form-item label="操作">
+                <el-select v-model="selectedNode.data.config.action" style="width:100%">
+                  <el-option label="加密" value="encrypt" />
+                  <el-option label="解密" value="decrypt" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="密钥">
+                <el-input v-model="selectedNode.data.config.key" placeholder="留空自动生成" />
+              </el-form-item>
+              <el-form-item label="输入内容">
+                <el-input v-model="selectedNode.data.config.text" type="textarea" :rows="3" placeholder="{{变量名}}" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'jwt_generate'">
+              <el-form-item label="载荷 (JSON)">
+                <el-input v-model="selectedNode.data.config.payload" type="textarea" :rows="3" placeholder='{"user_id": "1001", "role": "admin"}' />
+              </el-form-item>
+              <el-form-item label="密钥">
+                <el-input v-model="selectedNode.data.config.secret" placeholder="your-secret-key" />
+              </el-form-item>
+              <el-form-item label="过期时间(分钟)">
+                <el-input-number v-model="selectedNode.data.config.expire_minutes" :min="1" :max="1440" style="width:100%" />
+              </el-form-item>
+            </template>
+            <template v-if="selectedNode.type === 'schedule_trigger'">
+              <el-form-item label="触发类型">
+                <el-select v-model="selectedNode.data.config.schedule_type" style="width:100%">
+                  <el-option label="间隔执行" value="interval" />
+                  <el-option label="Cron表达式" value="cron" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="间隔(秒)" v-if="selectedNode.data.config.schedule_type === 'interval'">
+                <el-input-number v-model="selectedNode.data.config.interval" :min="1" :max="86400" style="width:100%" />
+              </el-form-item>
+              <el-form-item label="Cron表达式" v-if="selectedNode.data.config.schedule_type === 'cron'">
+                <el-input v-model="selectedNode.data.config.cron" placeholder="0 9 * * 1-5" />
+              </el-form-item>
+            </template>
             <el-button type="danger" size="small" @click="removeNode" style="width:100%;margin-top:8px">删除节点</el-button>
           </el-form>
         </div>
       </div>
     </div>
 
+    <!-- 运行历史对话框 -->
+    <el-dialog v-model="showRunsDialog" title="运行历史" width="800px">
+      <div v-if="viewingRunDetail">
+        <el-button size="small" @click="viewingRunDetail = null" style="margin-bottom:12px">← 返回列表</el-button>
+        <div style="margin-bottom:8px">
+          <el-tag :type="viewingRunDetail.status === 'completed' ? 'success' : 'danger'" size="small">{{ viewingRunDetail.status }}</el-tag>
+          <span style="font-size:12px;color:#909399;margin-left:8px">{{ viewingRunDetail.created_at }}</span>
+        </div>
+        <div v-if="viewingRunDetail.node_results" class="node-results-tree">
+          <div v-for="(res, nid) in viewingRunDetail.node_results" :key="nid" class="node-result-item">
+            <div class="node-result-header">
+              <span class="node-result-status" :class="getStatusClass(res)">{{ getStatusIcon(res) }}</span>
+              <span class="node-result-id">{{ nid }}</span>
+            </div>
+            <div v-if="res && res.error" class="node-result-error">{{ res.error }}</div>
+            <div v-else-if="res && res.result" class="node-result-output">{{ truncate(JSON.stringify(res.result), 300) }}</div>
+          </div>
+        </div>
+      </div>
+      <div v-else>
+        <el-table :data="runLogs" v-loading="loadingRuns" size="small" max-height="400">
+          <el-table-column prop="status" label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'completed' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="时间" width="160" />
+          <el-table-column label="节点数" width="80">
+            <template #default="{ row }">{{ Object.keys(row.node_results || {}).length }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="80">
+            <template #default="{ row }">
+              <el-button size="small" link @click="viewRunDetail(row)">详情</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="showRunsDialog = false; viewingRunDetail = null">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 变量管理对话框 -->
+    <el-dialog v-model="showVariablesDialog" title="工作流变量" width="600px">
+      <div style="margin-bottom:8px;font-size:12px;color:#909399">在节点配置中用 <code>{{variables.变量名}}</code> 引用</div>
+      <el-table :data="wfVariables" size="small" max-height="300">
+        <el-table-column label="变量名" min-width="120">
+          <template #default="{ row }">
+            <el-input v-model="row.name" size="small" placeholder="变量名" />
+          </template>
+        </el-table-column>
+        <el-table-column label="默认值" min-width="150">
+          <template #default="{ row }">
+            <el-input v-model="row.value" size="small" placeholder="默认值" />
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="100">
+          <template #default="{ row }">
+            <el-select v-model="row.type" size="small">
+              <el-option label="字符串" value="string" />
+              <el-option label="数字" value="number" />
+              <el-option label="布尔" value="boolean" />
+              <el-option label="JSON" value="json" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column width="60">
+          <template #default="{ $index }">
+            <el-button size="small" type="danger" link @click="removeVariable($index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-button size="small" type="primary" @click="addVariable" style="margin-top:8px">+ 添加变量</el-button>
+      <template #footer>
+        <el-button @click="showVariablesDialog = false">取消</el-button>
+        <el-button type="primary" @click="currentWf.variables = wfVariables; showVariablesDialog = false; ElMessage.success('变量已保存')">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- AI创建工作流对话框 -->
+    <el-dialog v-model="showAiDialog" title="AI智能创建工作流" width="600px">
+      <div style="margin-bottom:12px;font-size:13px;color:#606266">用自然语言描述你想要的工作流，AI会自动为你生成。</div>
+      <el-input v-model="aiDescription" type="textarea" :rows="5" placeholder="例如：帮我创建一个工作流，读取CSV销售数据，过滤金额大于10000的记录，按金额排序，然后用LLM生成分析报告，最后导出为PDF" />
+      <div style="margin-top:8px;font-size:12px;color:#909399">支持的节点：LLM、工具调用、条件分支、循环、数据处理、图表生成、文档导出等66种节点</div>
+      <template #footer>
+        <el-button @click="showAiDialog = false">取消</el-button>
+        <el-button type="primary" :loading="aiGenerating" @click="generateByAI">{{ aiGenerating ? 'AI生成中...' : 'AI生成' }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 模板库对话框 -->
+    <el-dialog v-model="showTemplateDialog" title="工作流模板库" width="700px">
+      <div v-for="cat in templateCategories" :key="cat.label" style="margin-bottom:16px">
+        <div style="font-weight:600;margin-bottom:8px;color:#303133">{{ cat.label }}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div v-for="tpl in cat.templates" :key="tpl.name" class="template-card" @click="applyTemplate(tpl)">
+            <div style="font-weight:500;font-size:13px;margin-bottom:4px">{{ tpl.name }}</div>
+            <div style="font-size:11px;color:#909399">{{ tpl.desc }}</div>
+            <div style="font-size:11px;color:#b0b0b0;margin-top:4px">{{ tpl.nodes }} 个节点</div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showTemplateDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 执行输入对话框 -->
-    <el-dialog v-model="showRunDialog" title="执行工作流" width="500px">
-      <el-form label-position="top" size="small">
-        <el-form-item label="输入参数 (JSON)">
-          <el-input v-model="runInputs" type="textarea" :rows="6" placeholder='{"input": "你的输入内容"}' />
-        </el-form-item>
-      </el-form>
+    <el-dialog v-model="showRunDialog" title="执行工作流" width="600px">
+      <el-tabs v-model="runInputMode">
+        <el-tab-pane label="表单输入" name="form">
+          <el-form label-position="top" size="small">
+            <el-form-item label="input (工作流输入参数)">
+              <el-input v-model="runFormInput" type="textarea" :rows="4" placeholder="输入内容，如文本、URL、JSON数据等" />
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+        <el-tab-pane label="JSON输入" name="json">
+          <el-form label-position="top" size="small">
+            <el-form-item label="输入参数 (JSON)">
+              <el-input v-model="runInputs" type="textarea" :rows="6" placeholder='{"input": "你的输入内容"}' />
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
       <div v-if="runResult">
         <el-divider />
         <div style="font-size:13px;color:#606266;margin-bottom:8px">执行结果</div>
         <el-tag :type="runResult.status === 'completed' ? 'success' : 'danger'" size="small" style="margin-bottom:8px">{{ runResult.status }}</el-tag>
-        <pre style="background:#f5f7fa;padding:12px;border-radius:6px;font-size:12px;max-height:300px;overflow:auto;white-space:pre-wrap">{{ JSON.stringify(runResult.outputs || runResult.node_results, null, 2) }}</pre>
+        <div v-if="runResult.node_results" class="node-results-tree">
+          <div v-for="(res, nid) in runResult.node_results" :key="nid" class="node-result-item">
+            <div class="node-result-header">
+              <span class="node-result-status" :class="getStatusClass(res)">{{ getStatusIcon(res) }}</span>
+              <span class="node-result-id">{{ nid }}</span>
+              <span v-if="res && res.elapsed" class="node-result-time">{{ res.elapsed }}ms</span>
+            </div>
+            <div v-if="res && res.error" class="node-result-error">{{ res.error }}</div>
+            <div v-else-if="res && res.result" class="node-result-output">{{ truncate(JSON.stringify(res.result), 200) }}</div>
+          </div>
+        </div>
+        <pre v-else style="background:#f5f7fa;padding:12px;border-radius:6px;font-size:12px;max-height:300px;overflow:auto;white-space:pre-wrap">{{ JSON.stringify(runResult.outputs || runResult, null, 2) }}</pre>
       </div>
       <template #footer>
         <el-button @click="showRunDialog = false">关闭</el-button>
@@ -1143,6 +1612,8 @@ import '@vue-flow/controls/dist/style.css'
 
 const loadingList = ref(false)
 const workflows = ref([])
+const selectedWorkflows = ref([])
+const batchMode = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(15)
 const paginatedWorkflows = computed(() => {
@@ -1150,11 +1621,116 @@ const paginatedWorkflows = computed(() => {
   return workflows.value.slice(start, start + pageSize.value)
 })
 const editing = ref(false)
+const wfVariables = ref([])
+const showVariablesDialog = ref(false)
+
+const loadVariables = () => {
+  wfVariables.value = currentWf.value.variables || []
+}
+
+const addVariable = () => {
+  wfVariables.value.push({ name: '', value: '', type: 'string' })
+}
+
+const removeVariable = (idx) => {
+  wfVariables.value.splice(idx, 1)
+}
 const saving = ref(false)
 const currentWf = ref({ name: '', nodes: [], edges: [], status: 'draft' })
 const nodes = ref([])
 const edges = ref([])
 const selectedNode = ref(null)
+const availableSubWorkflows = ref([])
+
+const fetchSubWorkflows = async () => {
+  try {
+    const { data } = await getWorkflows()
+    availableSubWorkflows.value = (data.workflows || []).filter(wf => {
+      const wfId = wf.id || wf._id
+      const currentId = currentWf.value?.id || currentWf.value?._id
+      return wfId !== currentId
+    })
+  } catch (e) { /* ignore */ }
+}
+
+const loadingSmartConfig = ref(false)
+
+const loadSmartConfig = async () => {
+  if (!selectedNode.value || !currentWf.value) return
+  loadingSmartConfig.value = true
+  try {
+    const resp = await fetch(`/api/v1/workflows/${currentWf.value.id || currentWf.value._id}/suggest-config/${selectedNode.value.id}`)
+    const data = await resp.json()
+    if (data.suggestions) {
+      Object.assign(selectedNode.value.data.config, data.suggestions)
+      ElMessage.success('已应用推荐配置')
+    }
+  } catch (e) { ElMessage.error('获取推荐失败') }
+  finally { loadingSmartConfig.value = false }
+}
+
+const getWorkflowName = (wfId) => {
+  const wf = availableSubWorkflows.value.find(w => (w.id || w._id) === wfId)
+  return wf ? wf.name : wfId
+}
+
+const nodeSearchQuery = ref('')
+const nodeCategory = ref('all')
+const nodeCategories = [
+  { value: 'all', label: '全部' },
+  { value: 'data', label: '数据处理' },
+  { value: 'ai', label: 'AI/LLM' },
+  { value: 'tool', label: '工具' },
+  { value: 'control', label: '控制流' },
+  { value: 'office', label: '办公' },
+  { value: 'devops', label: '运维' },
+  { value: 'security', label: '安全' },
+  { value: 'format', label: '数据格式' },
+]
+const nodeCategoryMap = {
+  data: ['csv_parse','data_filter','data_sort','data_merge','deduplicate','pivot_table','correlation','statistics','excel_read','excel_write'],
+  ai: ['llm','text_translate','text_summarize','sentiment_analysis','text_embedding','image_gen','image_process','speech_to_text','text_to_speech'],
+  tool: ['tool','file_operation','webhook','code_exec','file_watcher'],
+  control: ['start','output','condition','switch','loop','parallel','delay','retry','error_handler','sub_workflow','approval','schedule_trigger'],
+  office: ['docx_read','docx_write','pdf_generate','template_render','chart_gen','calendar_event','email_send','notify','text_split','markdown_html'],
+  devops: ['ssh_exec','log_analyze','backup','network_ping','http_stream','websocket_connect','database'],
+  security: ['encrypt','jwt_generate','hash_encode','qrcode_gen','qrcode_scan','url_shorten','regex_replace'],
+  format: ['json_build','json_parse','json_diff','type_convert','uuid_generate','math_calc','datetime','regex'],
+}
+const undoStack = ref([])
+const redoStack = ref([])
+const pushUndo = () => {
+  undoStack.value.push(JSON.stringify({ nodes: nodes.value, edges: edges.value }))
+  if (undoStack.value.length > 50) undoStack.value.shift()
+  redoStack.value = []
+}
+const undo = () => {
+  if (undoStack.value.length === 0) return
+  redoStack.value.push(JSON.stringify({ nodes: nodes.value, edges: edges.value }))
+  const prev = JSON.parse(undoStack.value.pop())
+  nodes.value = prev.nodes
+  edges.value = prev.edges
+}
+const redo = () => {
+  if (redoStack.value.length === 0) return
+  undoStack.value.push(JSON.stringify({ nodes: nodes.value, edges: edges.value }))
+  const next = JSON.parse(redoStack.value.pop())
+  nodes.value = next.nodes
+  edges.value = next.edges
+}
+
+const filteredNodeTypes = computed(() => {
+  let list = nodeTypes
+  if (nodeCategory.value !== 'all') {
+    const cats = nodeCategoryMap[nodeCategory.value] || []
+    list = list.filter(nt => cats.includes(nt.type))
+  }
+  if (nodeSearchQuery.value) {
+    const q = nodeSearchQuery.value.toLowerCase()
+    list = list.filter(nt => nt.label.toLowerCase().includes(q) || nt.type.toLowerCase().includes(q))
+  }
+  return list
+})
 
 const nodeTypes = [
   { type: 'start', label: '输入', icon: '📥', color: '#ecf5ff' },
@@ -1203,9 +1779,31 @@ const nodeTypes = [
   { type: 'pdf_generate', label: 'PDF生成', icon: '📋', color: '#fef0f0' },
   { type: 'json_diff', label: 'JSON对比', icon: '🔍', color: '#f0f9eb' },
   { type: 'output', label: '输出', icon: '📤', color: '#ecf5ff' },
+  { type: 'approval', label: '审批节点', icon: '✅', color: '#f0f9eb' },
+  { type: 'email_send', label: '发送邮件', icon: '📧', color: '#ecf5ff' },
+  { type: 'excel_write', label: 'Excel写入', icon: '📗', color: '#f0f9eb' },
+  { type: 'chart_gen', label: '图表生成', icon: '📊', color: '#fdf6ec' },
+  { type: 'statistics', label: '统计计算', icon: '📈', color: '#f0f9eb' },
+  { type: 'calendar_event', label: '日历事件', icon: '📅', color: '#ecf5ff' },
+  { type: 'sentiment_analysis', label: '情感分析', icon: '💭', color: '#fef0f0' },
+  { type: 'template_render', label: '模板渲染', icon: '📝', color: '#f4f4f5' },
+  { type: 'ssh_exec', label: 'SSH远程', icon: '🖥️', color: '#fef0f0' },
+  { type: 'log_analyze', label: '日志分析', icon: '📋', color: '#fdf6ec' },
+  { type: 'backup', label: '数据备份', icon: '💾', color: '#ecf5ff' },
+  { type: 'data_merge', label: '数据合并', icon: '🔗', color: '#f4f4f5' },
+  { type: 'deduplicate', label: '数据去重', icon: '✂️', color: '#fef0f0' },
+  { type: 'pivot_table', label: '透视表', icon: '📊', color: '#f0f9eb' },
+  { type: 'correlation', label: '相关性分析', icon: '📉', color: '#fdf6ec' },
+  { type: 'docx_read', label: 'Word读取', icon: '📄', color: '#ecf5ff' },
+  { type: 'docx_write', label: 'Word写入', icon: '📝', color: '#f4f4f5' },
+  { type: 'encrypt', label: '加密解密', icon: '🔒', color: '#fef0f0' },
+  { type: 'jwt_generate', label: 'JWT生成', icon: '🔑', color: '#fdf6ec' },
+  { type: 'schedule_trigger', label: '定时触发', icon: '⏰', color: '#ecf5ff' },
 ]
 
 const showRunDialog = ref(false)
+const runInputMode = ref('form')
+const runFormInput = ref('')
 const runInputs = ref('{\n  "input": "测试输入"\n}')
 const runResult = ref(null)
 const running = ref(false)
@@ -1214,6 +1812,347 @@ const runTarget = ref(null)
 const showRunsDialog = ref(false)
 const runLogs = ref([])
 const loadingRuns = ref(false)
+const viewingRunDetail = ref(null)
+
+const viewRuns = async (wf) => {
+  showRunsDialog.value = true
+  loadingRuns.value = true
+  try {
+    const { data } = await getWorkflowRuns(wf.id || wf._id)
+    runLogs.value = data.runs || []
+  } catch (e) { ElMessage.error('加载运行记录失败') }
+  finally { loadingRuns.value = false }
+}
+
+const viewRunDetail = async (run) => {
+  viewingRunDetail.value = run
+}
+
+const showAiDialog = ref(false)
+const aiDescription = ref('')
+const aiGenerating = ref(false)
+
+const generateByAI = async () => {
+  if (!aiDescription.value.trim()) return ElMessage.warning('请输入需求描述')
+  aiGenerating.value = true
+  try {
+    const { data } = await apiPost('/workflows/ai-generate', { description: aiDescription.value })
+    showAiDialog.value = false
+    ElMessage.success('AI工作流已生成')
+    fetchWorkflows()
+  } catch (e) { ElMessage.error('生成失败: ' + (e.detail || e.message || JSON.stringify(e))) }
+  finally { aiGenerating.value = false }
+}
+
+const showTemplateDialog = ref(false)
+const templateCategories = [
+  { label: '运维', templates: [
+    { name: '系统巡检日报', desc: '执行命令+日志分析+LLM报告+PDF', nodes: 9 },
+    { name: '服务健康监控', desc: 'Ping+HTTP+日志+条件+告警', nodes: 8 },
+    { name: '日志智能分析', desc: '扫描+正则+统计+LLM+Word+PDF', nodes: 8 },
+    { name: '自动化部署验证', desc: '进程+端口+重试+日志+LLM', nodes: 7 },
+  ]},
+  { label: '数据', templates: [
+    { name: 'CSV数据分析', desc: '解析+过滤+排序+统计+图表', nodes: 6 },
+    { name: '报表生成器', desc: '代码生成+Excel+图表+LLM', nodes: 5 },
+    { name: '数据清洗管线', desc: 'HTTP+正则+条件+LLM', nodes: 6 },
+    { name: '多源数据整合', desc: '合并+去重+透视+图表', nodes: 5 },
+  ]},
+  { label: '办公', templates: [
+    { name: '周报生成器', desc: '分割+LLM润色+PDF+HTML', nodes: 7 },
+    { name: '合同模板生成', desc: '模板渲染+Word+日历', nodes: 5 },
+    { name: '会议纪要', desc: '分割+LLM+翻译+PDF+HTML', nodes: 6 },
+    { name: '审批文档流程', desc: 'LLM+审批+Word', nodes: 4 },
+  ]},
+  { label: 'AI', templates: [
+    { name: 'RAG知识问答', desc: '知识库+LLM+摘要+UUID+JSON', nodes: 8 },
+    { name: '智能内容路由', desc: 'LLM分类+条件+专家LLM', nodes: 6 },
+    { name: '客户反馈分析', desc: '情感分析+条件+LLM回复', nodes: 5 },
+    { name: '多格式导出', desc: 'LLM+并行+HTML+PDF+JSON', nodes: 6 },
+  ]},
+]
+
+const applyTemplate = async (tpl) => {
+  const templateData = templateWorkflows[tpl.name]
+  if (!templateData) { ElMessage.warning('模板暂未实现'); return }
+  try {
+    const { data } = await apiCreate({ name: tpl.name, description: tpl.desc, nodes: templateData.nodes, edges: templateData.edges })
+    showTemplateDialog.value = false
+    ElMessage.success('模板已创建: ' + tpl.name)
+    fetchWorkflows()
+  } catch (e) { ElMessage.error('创建失败') }
+}
+
+const templateWorkflows = {
+  '系统巡检日报': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'tool', label: '磁盘空间', position: { x: 250, y: 100 }, config: { tool_name: 'run_command', input_template: 'wmic logicaldisk get size,freespace,caption /format:csv', timeout: 15 } },
+      { id: 'n2', type: 'tool', label: '内存使用', position: { x: 250, y: 250 }, config: { tool_name: 'run_command', input_template: 'systeminfo | findstr /C:"Total Physical Memory"', timeout: 15 } },
+      { id: 'n3', type: 'log_analyze', label: '日志分析', position: { x: 500, y: 100 }, config: { keyword: 'error', max_lines: 2000 } },
+      { id: 'n4', type: 'statistics', label: '错误统计', position: { x: 500, y: 250 }, config: { data: '[{"count":3},{"count":1},{"count":5}]', 'field': 'count', 'operation': 'mean' } },
+      { id: 'n5', type: 'llm', label: '生成报告', position: { x: 750, y: 200 }, config: { provider: 'agnes', prompt: '生成系统巡检日报:\n磁盘: {{n1.result}}\n内存: {{n2.result}}\n错误数: {{n3.count}}' } },
+      { id: 'n6', type: 'pdf_generate', label: 'PDF报告', position: { x: 1000, y: 150 }, config: { input_template: '{{n5.response}}', title: 'System Check Report' } },
+      { id: 'n7', type: 'backup', label: '备份日志', position: { x: 1000, y: 300 }, config: { source: './backend.log' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1200, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 's1', target: 'n2' },
+      { id: 'e3', source: 'n1', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n4' },
+      { id: 'e5', source: 'n3', target: 'n5' }, { id: 'e6', source: 'n4', target: 'n5' },
+      { id: 'e7', source: 'n5', target: 'n6' }, { id: 'e8', source: 'n3', target: 'n7' },
+      { id: 'e9', source: 'n6', target: 'e1' }, { id: 'e10', source: 'n7', target: 'e1' }
+    ]
+  },
+  '服务健康监控': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'network_ping', label: 'Ping检测', position: { x: 250, y: 100 }, config: { input_template: '127.0.0.1', count: 3 } },
+      { id: 'n2', type: 'tool', label: 'HTTP探测', position: { x: 250, y: 250 }, config: { tool_name: 'http', method: 'GET', input_template: '{{s1.input}}', timeout: 10 } },
+      { id: 'n3', type: 'log_analyze', label: '日志扫描', position: { x: 250, y: 400 }, config: { keyword: 'error', max_lines: 1000 } },
+      { id: 'n4', type: 'condition', label: 'HTTP正常?', position: { x: 500, y: 200 }, config: { condition: 'n2.status_code', operator: 'eq', value: '200' } },
+      { id: 'n5', type: 'llm', label: '分析告警', position: { x: 750, y: 150 }, config: { provider: 'agnes', prompt: '分析服务异常:\nPing: {{n1.success}}\nHTTP: {{n2.status_code}}\n错误: {{n3.count}}' } },
+      { id: 'n6', type: 'backup', label: '备份日志', position: { x: 750, y: 350 }, config: { source: './backend.log' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 's1', target: 'n2' },
+      { id: 'e3', source: 's1', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n4' },
+      { id: 'e5', source: 'n4', target: 'n5', sourceHandle: 'true' },
+      { id: 'e6', source: 'n3', target: 'n6' },
+      { id: 'e7', source: 'n5', target: 'e1' }, { id: 'e8', source: 'n6', target: 'e1' }
+    ]
+  },
+  'CSV数据分析': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'csv_parse', label: '解析CSV', position: { x: 250, y: 200 }, config: { delimiter: ',', has_header: true, input_template: '{{s1.input}}' } },
+      { id: 'n2', type: 'data_filter', label: '过滤数据', position: { x: 500, y: 100 }, config: { data_var: 'n1.result', operator: 'gt', value: '0' } },
+      { id: 'n3', type: 'statistics', label: '统计计算', position: { x: 500, y: 250 }, config: { data: '{{n1.result}}', operation: 'mean' } },
+      { id: 'n4', type: 'chart_gen', label: '生成图表', position: { x: 750, y: 200 }, config: { data: '{{n1.result}}', chart_type: 'bar', title: '数据分析' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n1', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n4' },
+      { id: 'e5', source: 'n3', target: 'n4' }, { id: 'e6', source: 'n4', target: 'e1' }
+    ]
+  },
+  '报表生成器': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'code_exec', label: '生成数据', position: { x: 250, y: 200 }, config: { language: 'python', code: 'import json\nprint(json.dumps([{"month":"Jan","sales":100},{"month":"Feb","sales":150},{"month":"Mar","sales":200}]))', timeout: 10 } },
+      { id: 'n2', type: 'excel_write', label: '写入Excel', position: { x: 500, y: 100 }, config: { data: '{{n1.result}}', sheet_name: 'Sheet1' } },
+      { id: 'n3', type: 'chart_gen', label: '生成图表', position: { x: 500, y: 250 }, config: { data: '{{n1.result}}', chart_type: 'bar', title: '销售报表' } },
+      { id: 'n4', type: 'llm', label: '分析报告', position: { x: 750, y: 200 }, config: { provider: 'agnes', prompt: '分析以下销售数据:\n{{n1.result}}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n1', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n4' },
+      { id: 'e5', source: 'n3', target: 'n4' }, { id: 'e6', source: 'n4', target: 'e1' }
+    ]
+  },
+  '周报生成器': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'text_split', label: '拆分工作项', position: { x: 250, y: 200 }, config: { delimiter: ';', text: '{{s1.input}}' } },
+      { id: 'n2', type: 'llm', label: '润色内容', position: { x: 500, y: 200 }, config: { provider: 'agnes', prompt: '将以下工作项润色为正式周报:\n{{n1.items}}' } },
+      { id: 'n3', type: 'datetime', label: '当前日期', position: { x: 500, y: 350 }, config: { action: 'now', format: '%Y年第%W周' } },
+      { id: 'n4', type: 'pdf_generate', label: '生成PDF', position: { x: 750, y: 150 }, config: { input_template: '周报 - {{n3.result}}\n\n{{n2.response}}', title: 'Weekly Report' } },
+      { id: 'n5', type: 'markdown_html', label: '生成HTML', position: { x: 750, y: 300 }, config: { input_template: '# 周报 - {{n3.result}}\n\n{{n2.response}}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 's1', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n4' },
+      { id: 'e5', source: 'n2', target: 'n5' }, { id: 'e6', source: 'n3', target: 'n4' },
+      { id: 'e7', source: 'n3', target: 'n5' }, { id: 'e8', source: 'n4', target: 'e1' },
+      { id: 'e9', source: 'n5', target: 'e1' }
+    ]
+  },
+  'RAG知识问答': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'tool', label: '知识库检索', position: { x: 250, y: 200 }, config: { tool_name: 'knowledge_search', input_template: '{{s1.input}}', top_k: 5 } },
+      { id: 'n2', type: 'llm', label: 'RAG回答', position: { x: 500, y: 200 }, config: { provider: 'agnes', prompt: '基于检索结果回答:\n{{n1.results}}\n问题: {{s1.input}}' } },
+      { id: 'n3', type: 'text_summarize', label: '摘要', position: { x: 750, y: 100 }, config: { max_length: 200, input_template: '{{n2.response}}' } },
+      { id: 'n4', type: 'uuid_generate', label: '生成ID', position: { x: 750, y: 250 }, config: {} },
+      { id: 'n5', type: 'datetime', label: '时间戳', position: { x: 750, y: 380 }, config: { action: 'now' } },
+      { id: 'n6', type: 'json_build', label: '构建记录', position: { x: 1000, y: 200 }, config: { fields: '{"id":"{{n4.uuid}}","question":"{{s1.input}}","answer":"{{n2.response}}","time":"{{n5.result}}"}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1200, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n2', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n6' },
+      { id: 'e5', source: 'n3', target: 'n6' }, { id: 'e6', source: 'n4', target: 'n6' },
+      { id: 'e7', source: 'n5', target: 'n6' }, { id: 'e8', source: 'n6', target: 'e1' }
+    ]
+  },
+  '智能内容路由': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'llm', label: '意图识别', position: { x: 250, y: 200 }, config: { provider: 'agnes', prompt: '判断用户意图，只回答一个词：代码/翻译/写作\n用户: {{s1.input}}' } },
+      { id: 'n2', type: 'switch', label: '路由分发', position: { x: 500, y: 200 }, config: { switch_var: '{{n1.response}}' } },
+      { id: 'n3', type: 'llm', label: '代码专家', position: { x: 750, y: 80 }, config: { provider: 'agnes', prompt: '你是代码专家，请生成代码:\n{{s1.input}}' } },
+      { id: 'n4', type: 'llm', label: '翻译专家', position: { x: 750, y: 200 }, config: { provider: 'agnes', prompt: '你是翻译专家，请翻译:\n{{s1.input}}' } },
+      { id: 'n5', type: 'llm', label: '写作专家', position: { x: 750, y: 320 }, config: { provider: 'agnes', prompt: '你是写作专家，请写作:\n{{s1.input}}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n2', target: 'n3', sourceHandle: 'case1' },
+      { id: 'e4', source: 'n2', target: 'n4', sourceHandle: 'default' },
+      { id: 'e5', source: 'n2', target: 'n5' },
+      { id: 'e6', source: 'n3', target: 'e1' }, { id: 'e7', source: 'n4', target: 'e1' },
+      { id: 'e8', source: 'n5', target: 'e1' }
+    ]
+  },
+  '客户反馈分析': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'sentiment_analysis', label: '情感分析', position: { x: 250, y: 200 }, config: { text: '{{s1.input}}' } },
+      { id: 'n2', type: 'condition', label: '是否负面?', position: { x: 500, y: 200 }, config: { condition: 'n1.score', operator: 'lt', value: '0' } },
+      { id: 'n3', type: 'llm', label: '生成回复', position: { x: 750, y: 100 }, config: { provider: 'agnes', prompt: '客户反馈: {{s1.input}}\n情感: {{n1.result}}\n请生成专业回复' } },
+      { id: 'n4', type: 'transform', label: '记录正面', position: { x: 750, y: 300 }, config: { expression: "'正面反馈已记录'" } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n2', target: 'n3', sourceHandle: 'true' },
+      { id: 'e4', source: 'n2', target: 'n4', sourceHandle: 'false' },
+      { id: 'e5', source: 'n3', target: 'e1' }, { id: 'e6', source: 'n4', target: 'e1' }
+    ]
+  },
+  '多格式导出': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'llm', label: '生成内容', position: { x: 250, y: 200 }, config: { provider: 'agnes', prompt: '围绕以下主题生成500字文章:\n{{s1.input}}' } },
+      { id: 'n2', type: 'markdown_html', label: '转HTML', position: { x: 500, y: 100 }, config: { input_template: '{{n1.response}}' } },
+      { id: 'n3', type: 'pdf_generate', label: '生成PDF', position: { x: 500, y: 250 }, config: { input_template: '{{n1.response}}', title: 'AI Document' } },
+      { id: 'n4', type: 'json_build', label: 'JSON输出', position: { x: 500, y: 400 }, config: { fields: '{"title":"{{s1.input}}","content":"{{n1.response}}"}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 750, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n1', target: 'n3' }, { id: 'e4', source: 'n1', target: 'n4' },
+      { id: 'e5', source: 'n2', target: 'e1' }, { id: 'e6', source: 'n3', target: 'e1' },
+      { id: 'e7', source: 'n4', target: 'e1' }
+    ]
+  },
+  '日志智能分析': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'log_analyze', label: '扫描ERROR', position: { x: 250, y: 150 }, config: { keyword: 'error', max_lines: 5000 } },
+      { id: 'n2', type: 'statistics', label: '错误统计', position: { x: 250, y: 350 }, config: { data: '[{"count":12},{"count":5},{"count":3}]', 'field': 'count', 'operation': 'sum' } },
+      { id: 'n3', type: 'chart_gen', label: '错误图表', position: { x: 500, y: 200 }, config: { data: '[{"type":"auth","count":12},{"type":"timeout","count":5}]', chart_type: 'pie', title: 'Error Distribution' } },
+      { id: 'n4', type: 'llm', label: '分析建议', position: { x: 750, y: 200 }, config: { provider: 'agnes', prompt: '分析日志错误:\n错误数: {{n1.count}}\n总和: {{n2.result}}' } },
+      { id: 'n5', type: 'docx_write', label: 'Word报告', position: { x: 1000, y: 100 }, config: { title: 'Log Report', content: '{{n4.response}}' } },
+      { id: 'n6', type: 'backup', label: '备份', position: { x: 1000, y: 300 }, config: { source: './backend.log' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1200, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n1', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n4' },
+      { id: 'e5', source: 'n3', target: 'n4' }, { id: 'e6', source: 'n4', target: 'n5' },
+      { id: 'e7', source: 'n4', target: 'n6' }, { id: 'e8', source: 'n5', target: 'e1' },
+      { id: 'e9', source: 'n6', target: 'e1' }
+    ]
+  },
+  '合同模板生成': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'template_render', label: '渲染模板', position: { x: 250, y: 200 }, config: { template: '甲方: {{party_a}}\n乙方: {{party_b}}\n金额: {{amount}}元', data: '{"party_a":"甲方","party_b":"乙方","amount":"50000"}' } },
+      { id: 'n2', type: 'docx_write', label: '生成Word', position: { x: 500, y: 100 }, config: { title: '服务合同', content: '{{n1.result}}' } },
+      { id: 'n3', type: 'calendar_event', label: '签约日程', position: { x: 500, y: 300 }, config: { title: '合同签约', start_time: '2026-06-25 10:00', end_time: '2026-06-25 11:00' } },
+      { id: 'n4', type: 'hash_encode', label: '文档哈希', position: { x: 750, y: 200 }, config: { algorithm: 'md5', input_template: '{{n1.result}}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 's1', target: 'n3' }, { id: 'e4', source: 'n1', target: 'n4' },
+      { id: 'e5', source: 'n2', target: 'e1' }, { id: 'e6', source: 'n3', target: 'e1' },
+      { id: 'e7', source: 'n4', target: 'e1' }
+    ]
+  },
+  '会议纪要': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'text_split', label: '拆分议题', position: { x: 250, y: 200 }, config: { delimiter: '|', text: '{{s1.input}}' } },
+      { id: 'n2', type: 'llm', label: '议题总结', position: { x: 500, y: 200 }, config: { provider: 'agnes', prompt: '总结会议议题:\n{{n1.items}}' } },
+      { id: 'n3', type: 'text_translate', label: '英文翻译', position: { x: 500, y: 350 }, config: { text: '{{n2.response}}', target_lang: 'English' } },
+      { id: 'n4', type: 'pdf_generate', label: 'PDF纪要', position: { x: 750, y: 150 }, config: { input_template: '{{n2.response}}', title: 'Meeting Minutes' } },
+      { id: 'n5', type: 'markdown_html', label: 'HTML纪要', position: { x: 750, y: 300 }, config: { input_template: '# 会议纪要\n\n{{n2.response}}\n\n## English\n\n{{n3.result}}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n2', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n4' },
+      { id: 'e5', source: 'n3', target: 'n5' }, { id: 'e6', source: 'n4', target: 'n5' },
+      { id: 'e7', source: 'n5', target: 'e1' }
+    ]
+  },
+  '审批文档流程': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'llm', label: '生成方案', position: { x: 250, y: 200 }, config: { provider: 'agnes', prompt: '为以下需求生成方案:\n{{s1.input}}' } },
+      { id: 'n2', type: 'approval', label: '主管审批', position: { x: 500, y: 200 }, config: { timeout: 10 } },
+      { id: 'n3', type: 'docx_write', label: '生成文档', position: { x: 750, y: 200 }, config: { title: '项目方案', content: '{{n1.response}}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n2', target: 'n3' }, { id: 'e4', source: 'n3', target: 'e1' }
+    ]
+  },
+  '自动化部署验证': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'tool', label: '检查进程', position: { x: 250, y: 100 }, config: { tool_name: 'run_command', input_template: 'tasklist /fi "imagename eq python.exe" /fo csv /nh', timeout: 10 } },
+      { id: 'n2', type: 'tool', label: '检查端口', position: { x: 250, y: 250 }, config: { tool_name: 'run_command', input_template: 'netstat -ano | findstr :8000', timeout: 10 } },
+      { id: 'n3', type: 'log_analyze', label: '启动日志', position: { x: 500, y: 150 }, config: { keyword: 'startup', max_lines: 1000 } },
+      { id: 'n4', type: 'llm', label: '部署报告', position: { x: 750, y: 200 }, config: { provider: 'agnes', prompt: '部署检查结果:\n进程: {{n1.result}}\n端口: {{n2.result}}\n启动日志: {{n3.result}}' } },
+      { id: 'n5', type: 'hash_encode', label: '校验码', position: { x: 750, y: 350 }, config: { algorithm: 'sha256', input_template: '{{n4.response}}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 's1', target: 'n2' },
+      { id: 'e3', source: 'n1', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n3' },
+      { id: 'e5', source: 'n3', target: 'n4' }, { id: 'e6', source: 'n4', target: 'n5' },
+      { id: 'e7', source: 'n5', target: 'e1' }
+    ]
+  },
+  '数据清洗管线': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'tool', label: 'HTTP抓取', position: { x: 250, y: 200 }, config: { tool_name: 'http', method: 'GET', input_template: '{{s1.input}}', timeout: 30 } },
+      { id: 'n2', type: 'tool', label: '正则提取', position: { x: 500, y: 100 }, config: { tool_name: 'regex', pattern: '\\d{4}-\\d{2}-\\d{2}', input_template: '{{n1.body}}' } },
+      { id: 'n3', type: 'condition', label: '有数据?', position: { x: 500, y: 300 }, config: { condition: 'n2.count', operator: 'gt', value: '0' } },
+      { id: 'n4', type: 'llm', label: 'LLM分析', position: { x: 750, y: 200 }, config: { provider: 'agnes', prompt: '分析数据:\n匹配: {{n2.matches}}\n原始: {{n1.body}}' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 1000, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 'n1', target: 'n2' },
+      { id: 'e3', source: 'n2', target: 'n3' }, { id: 'e4', source: 'n3', target: 'n4', sourceHandle: 'true' },
+      { id: 'e5', source: 'n4', target: 'e1' }
+    ]
+  },
+  '多源数据整合': {
+    nodes: [
+      { id: 's1', type: 'start', label: '输入', position: { x: 50, y: 200 }, config: {} },
+      { id: 'n1', type: 'code_exec', label: '数据源A', position: { x: 200, y: 100 }, config: { language: 'python', code: 'import json\nprint(json.dumps([{"id":"P1","name":"产品A","q1":100},{"id":"P2","name":"产品B","q1":200}]))', timeout: 10 } },
+      { id: 'n2', type: 'code_exec', label: '数据源B', position: { x: 200, y: 300 }, config: { language: 'python', code: 'import json\nprint(json.dumps([{"id":"P1","price":50},{"id":"P2","price":80}]))', timeout: 10 } },
+      { id: 'n3', type: 'data_merge', label: '合并数据', position: { x: 450, y: 200 }, config: { left_var: 'n1.result', right_var: 'n2.result', left_key: 'id', right_key: 'id' } },
+      { id: 'n4', type: 'chart_gen', label: '生成图表', position: { x: 700, y: 200 }, config: { data: '{{n3.result}}', chart_type: 'bar', title: '产品销售额' } },
+      { id: 'e1', type: 'output', label: '输出', position: { x: 950, y: 200 }, config: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 's1', target: 'n1' }, { id: 'e2', source: 's1', target: 'n2' },
+      { id: 'e3', source: 'n1', target: 'n3' }, { id: 'e4', source: 'n2', target: 'n3' },
+      { id: 'e5', source: 'n3', target: 'n4' }, { id: 'e6', source: 'n4', target: 'e1' }
+    ]
+  },
+}
 
 const showImportDialogFlag = ref(false)
 const importMode = ref('json')
@@ -1229,6 +2168,61 @@ const showSaveVersionFlag = ref(false)
 const versionComment = ref('')
 const savingVersion = ref(false)
 const versionTarget = ref(null)
+
+// Keyboard shortcuts
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo() }
+  })
+}
+
+const toggleBatchMode = () => {
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) selectedWorkflows.value = []
+}
+
+const batchDelete = async () => {
+  if (selectedWorkflows.value.length === 0) return ElMessage.warning('请先选择工作流')
+  try {
+    await ElMessageBox.confirm(`确定删除 ${selectedWorkflows.value.length} 个工作流?`, '批量删除', { type: 'warning' })
+    for (const wf of selectedWorkflows.value) {
+      await apiDelete(wf.id || wf._id)
+    }
+    ElMessage.success('批量删除成功')
+    selectedWorkflows.value = []
+    batchMode.value = false
+    fetchWorkflows()
+  } catch (e) { if (e !== 'cancel') ElMessage.error('批量删除失败') }
+}
+
+const batchExport = async () => {
+  if (selectedWorkflows.value.length === 0) return ElMessage.warning('请先选择工作流')
+  const exportData = []
+  for (const wf of selectedWorkflows.value) {
+    try {
+      const { data } = await apiExport(wf.id || wf._id)
+      exportData.push(data)
+    } catch (e) { /* skip */ }
+  }
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `workflows_batch_${Date.now()}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success(`已导出 ${exportData.length} 个工作流`)
+}
+
+const apiPost = async (url, data) => {
+  const resp = await fetch(`/api/v1${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!resp.ok) {
+    const text = await resp.text()
+    try { throw JSON.parse(text) } catch { throw new Error(text || `HTTP ${resp.status}`) }
+  }
+  return { data: await resp.json() }
+}
 
 const fetchWorkflows = async () => {
   loadingList.value = true
@@ -1264,7 +2258,21 @@ const editWorkflow = async (wf) => {
   } catch (e) { ElMessage.error('加载失败') }
 }
 
+const getStatusClass = (res) => {
+  if (!res) return 'pending'
+  if (res.error) return 'error'
+  return 'success'
+}
+const getStatusIcon = (res) => {
+  if (!res) return '⏳'
+  if (res.error) return '❌'
+  return '✅'
+}
+const truncate = (str, len) => str && str.length > len ? str.slice(0, len) + '...' : str
+
 const runWf = () => {
+  runFormInput.value = ''
+  runInputMode.value = 'form'
   runTarget.value = currentWf.value
   runResult.value = null
   runInputs.value = '{\n  "input": "测试输入"\n}'
@@ -1272,6 +2280,7 @@ const runWf = () => {
 }
 
 const handleMore = (cmd, row) => {
+  if (cmd === 'log') viewRuns(row)
   if (cmd === 'log') viewRuns(row)
   else if (cmd === 'version') viewVersions(row)
   else if (cmd === 'export') doExport(row)
@@ -1323,21 +2332,15 @@ const doRun = async () => {
   running.value = true
   try {
     let inputs = {}
+    if (runInputMode.value === 'form') {
+      inputs = { input: runFormInput.value }
+    } else {
     try { inputs = JSON.parse(runInputs.value) } catch (e) { ElMessage.warning('JSON 格式错误'); running.value = false; return }
+}
     const { data } = await apiRun(runTarget.value.id || runTarget.value._id, inputs)
     runResult.value = data
     ElMessage.success('执行完成')
   } catch (e) { ElMessage.error('执行失败') } finally { running.value = false }
-}
-
-const viewRuns = async (wf) => {
-  runTarget.value = wf
-  showRunsDialog.value = true
-  loadingRuns.value = true
-  try {
-    const { data } = await getWorkflowRuns(wf.id || wf._id)
-    runLogs.value = data.runs || []
-  } catch (e) { ElMessage.error('加载失败') } finally { loadingRuns.value = false }
 }
 
 const onDragStart = (event, type) => {
@@ -1346,6 +2349,7 @@ const onDragStart = (event, type) => {
 }
 
 const onDrop = (event) => {
+  pushUndo()
   const type = event.dataTransfer.getData('application/node-type')
   if (!type) return
   const nt = nodeTypes.find(n => n.type === type)
@@ -1367,8 +2371,7 @@ const nodeTypeLabels = { start: '\u8f93\u5165', llm: 'LLM', tool: '\u5de5\u5177'
 const upstreamVars = computed(() => {
   if (!selectedNode.value) return []
   const vars = []
-  const id = selectedNode.value.id
-  const incomingEdges = edges.value.filter(e => e.target === id)
+  const incomingEdges = edges.value.filter(e => e.target === selectedNode.value.id)
   const upstreamIds = incomingEdges.map(e => e.source)
   if (upstreamIds.length === 0) {
     vars.push({ name: 'input', desc: '\u5de5\u4f5c\u6d41\u8f93\u5165\u53c2\u6570' })
@@ -1402,6 +2405,12 @@ const upstreamVars = computed(() => {
 })
 
 const { onConnect, onNodeClick, onPaneClick, onEdgeClick } = useVueFlow()
+const handleNodeClick = ({ node }) => {
+  selectedNode.value = node
+}
+const handlePaneClick = () => {
+  selectedNode.value = null
+}
 onConnect((params) => {
   edges.value = [...edges.value, { id: `e_${params.source}_${params.target}`, source: params.source, target: params.target, sourceHandle: params.sourceHandle }]
 })
@@ -1456,7 +2465,7 @@ const doExport = async (wf) => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${data.name || 'workflow'}.json`
+    a.download = `${wf.name || 'workflow'}.json`
     a.click()
     URL.revokeObjectURL(url)
     ElMessage.success('导出成功')
@@ -1497,19 +2506,6 @@ const doRestoreVersion = async (v) => {
     showVersionsDialog.value = false
     fetchWorkflows()
   } catch (e) { if (e !== 'cancel') ElMessage.error('恢复失败') }
-}
-
-const doExportVersion = async (v) => {
-  try {
-    const json = JSON.stringify({ name: v.name, description: v.description, nodes: v.nodes, edges: v.edges }, null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${v.name || 'workflow'}_v${v.version}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (e) { ElMessage.error('导出失败') }
 }
 
 const doDeleteVersion = async (v) => {
@@ -1614,4 +2610,23 @@ onMounted(fetchWorkflows)
 .var-hint-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .var-hint-item code { background: #fff; padding: 1px 6px; border-radius: 3px; color: #409eff; font-size: 11px; white-space: nowrap; }
 .var-hint-desc { color: #909399; font-size: 11px; }
+.node-search-input { width: 100%; padding: 6px 10px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 12px; margin-bottom: 8px; outline: none; }
+.node-search-input:focus { border-color: #409eff; }
+.node-category-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.node-cat-tag { padding: 2px 8px; font-size: 11px; border-radius: 10px; cursor: pointer; background: #f0f2f5; color: #606266; border: 1px solid transparent; }
+.node-cat-tag.active { background: #ecf5ff; color: #409eff; border-color: #b3d8ff; }
+.node-cat-tag:hover { background: #e9e9e9; }
+.node-list-scroll { max-height: calc(100vh - 260px); overflow-y: auto; }
+.node-results-tree { max-height: 300px; overflow-y: auto; }
+.node-result-item { padding: 6px 8px; margin-bottom: 4px; border-radius: 4px; background: #fafafa; border-left: 3px solid #dcdfe6; }
+.node-result-item:has(.success) { border-left-color: #67c23a; }
+.node-result-item:has(.error) { border-left-color: #f56c6c; }
+.node-result-header { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.node-result-status { font-size: 12px; }
+.node-result-id { font-weight: 500; color: #303133; }
+.node-result-time { color: #909399; font-size: 11px; margin-left: auto; }
+.node-result-error { color: #f56c6c; font-size: 11px; margin-top: 4px; word-break: break-all; }
+.node-result-output { color: #606266; font-size: 11px; margin-top: 4px; word-break: break-all; max-height: 60px; overflow: hidden; }
+.template-card { padding: 10px 12px; border: 1px solid #e4e7ed; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.template-card:hover { border-color: #409eff; background: #ecf5ff; }
 </style>
