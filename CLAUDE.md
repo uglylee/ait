@@ -21,6 +21,7 @@ AIT (AI Application Framework) - Full-stack AI application platform with FastAPI
 - `ocr_engine.py` — OCR with EasyOCR + AI enhancement
 - `frontend-vue/src/views/WorkflowView.vue` — Workflow visual editor (VueFlow)
 - `frontend-vue/src/views/KnowledgeView.vue` — Knowledge base management
+- `kb_files/` — Persistent storage for uploaded knowledge base files
 
 ## Development
 
@@ -64,9 +65,13 @@ Frontend VueFlow wraps as: `{id, type, position, data: {label, config}}`
 
 - Embedding: HuggingFace `all-MiniLM-L6-v2` (preloaded at startup)
 - Vector store: ChromaDB persistent storage in `./chroma_db`
-- Upload: supports PDF, Word, Excel, PPT, TXT, CSV, HTML, MD, JSON, XML, LOG
+- File storage: uploaded files saved to `./kb_files/` with timestamp prefix
+- Upload: supports PDF, Word, Excel, PPT, TXT, CSV, HTML, MD, JSON, XML, LOG (batch upload)
 - Query flow: User question → Embedding encoding → Vector search → Splice prompt → LLM answer
 - `use_ai=false` (default): returns only search results; `use_ai=true`: full RAG with LLM
+- Search results include source `file_name` and `file_id` for download
+- Thread-safe: `threading.Lock` protects concurrent add/search/clear operations
+- Clear: deletes ChromaDB collection + directory, resets `_cleared` flag
 
 ## Common Patterns
 
@@ -90,3 +95,5 @@ Frontend VueFlow wraps as: `{id, type, position, data: {label, config}}`
 - ChromaDB `get_stats()`: reads directly without loading embedding model
 - PyPDF needed for PDF upload: `pip install pypdf`
 - `langchain.schema` → use `langchain_core.documents` for Document import
+- ChromaDB file locks: `clear()` uses `shutil.rmtree` with retries + `gc.collect()`
+- uvicorn single worker: SSE streaming blocks cancel API, use Redis for cancel signals
