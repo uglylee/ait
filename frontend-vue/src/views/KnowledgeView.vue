@@ -21,6 +21,9 @@
                 <span class="stat-label">状态</span>
                 <el-tag :type="statusOk ? 'success' : 'danger'" size="small">{{ statusOk ? '就绪' : '异常' }}</el-tag>
               </div>
+              <el-button type="danger" size="small" style="width:100%;margin-top:8px" :loading="clearing" @click="clearKB" :disabled="!stats.total_chunks">
+                清空知识库
+              </el-button>
 
               <el-divider />
 
@@ -84,7 +87,13 @@
               <div v-for="(r, i) in results" :key="i" class="search-result">
                 <div class="result-score">{{ (r.score * 100).toFixed(0) }}%</div>
                 <div class="result-content">
-                  <div class="result-source">来源：片段 {{ i + 1 }}</div>
+                  <div class="result-source">
+                    片段 {{ i + 1 }}
+                    <span v-if="r.file_name" style="margin-left:8px">
+                      <el-tag size="small" type="info">{{ r.file_name }}</el-tag>
+                      <a v-if="r.file_name" :href="ragDownloadFile(r.file_id)" target="_blank" style="margin-left:4px;font-size:12px;color:#409eff;text-decoration:none">下载</a>
+                    </span>
+                  </div>
                   <div class="result-text">{{ r.content }}</div>
                 </div>
               </div>
@@ -98,14 +107,15 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, UploadFilled } from '@element-plus/icons-vue'
-import { ragStatus, ragAddText, ragAddFiles, ragQuery } from '../api'
+import { ragStatus, ragAddText, ragAddFiles, ragQuery, ragClear, ragDownloadFile } from '../api'
 
 const loading = ref(true)
 const stats = ref({})
 const statusOk = ref(false)
 const uploadRef = ref(null)
+const clearing = ref(false)
 
 const pendingFiles = ref([])
 const uploading = ref(false)
@@ -119,6 +129,23 @@ const results = ref([])
 const ragAnswer = ref('')
 const searchError = ref('')
 const useAI = ref(false)
+
+const clearKB = async () => {
+  try {
+    await ElMessageBox.confirm(`确定要清空知识库吗？将删除全部 ${stats.value.total_chunks || 0} 个文档片段，此操作不可恢复。`, '清空知识库', { type: 'warning', confirmButtonText: '确定清空', cancelButtonText: '取消' })
+    clearing.value = true
+    await ragClear()
+    stats.value = {}
+    results.value = []
+    ragAnswer.value = ''
+    ElMessage.success('知识库已清空')
+    await fetchStatus()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('清空失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    clearing.value = false
+  }
+}
 
 const fetchStatus = async () => {
   loading.value = true

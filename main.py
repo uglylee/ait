@@ -1138,6 +1138,9 @@ async def langchain_chat(request: ChatStreamRequest):
     response = conv.run(request.message)
     return {"response": response}
 
+_KB_FILES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kb_files")
+os.makedirs(_KB_FILES_DIR, exist_ok=True)
+
 @app.post("/api/v1/langchain/rag/add")
 async def rag_add_text(text: str = Query(""), file: UploadFile = File(None), uploaded_files: List[UploadFile] = File(None)):
     from langchain_engine import get_rag_engine
@@ -1150,18 +1153,14 @@ async def rag_add_text(text: str = Query(""), file: UploadFile = File(None), upl
         elif file:
             all_files = [file]
         if all_files:
-            import tempfile
             for upload_file in all_files:
                 content = await upload_file.read()
-                suffix = os.path.splitext(upload_file.filename or ".txt")[1]
-                fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-                try:
-                    with os.fdopen(fd, 'wb') as tmp:
-                        tmp.write(content)
-                    total_chunks += rag.add_file(tmp_path)
-                finally:
-                    if os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
+                fname = upload_file.filename or "unknown"
+                save_name = f"{int(__import__('time').time())}_{fname}"
+                save_path = os.path.join(_KB_FILES_DIR, save_name)
+                with open(save_path, "wb") as f:
+                    f.write(content)
+                total_chunks += rag.add_file(save_path)
         elif text:
             total_chunks = rag.add_text(text)
         else:
@@ -1172,6 +1171,50 @@ async def rag_add_text(text: str = Query(""), file: UploadFile = File(None), upl
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/v1/langchain/rag/clear")
+async def rag_clear():
+    from langchain_engine import get_rag_engine
+    rag = get_rag_engine()
+    rag.clear()
+    import shutil
+    if os.path.exists(_KB_FILES_DIR):
+        shutil.rmtree(_KB_FILES_DIR, ignore_errors=True)
+        os.makedirs(_KB_FILES_DIR, exist_ok=True)
+    return {"status": "ok", "message": "知识库已清空"}
+
+@app.get("/api/v1/langchain/rag/files")
+async def rag_list_files():
+    files = []
+    if os.path.exists(_KB_FILES_DIR):
+        for fname in sorted(os.listdir(_KB_FILES_DIR)):
+            fpath = os.path.join(_KB_FILES_DIR, fname)
+            if os.path.isfile(fpath):
+                orig_name = fname.split("_", 1)[1] if "_" in fname else fname
+                files.append({
+                    "id": fname,
+                    "name": orig_name,
+                    "size": os.path.getsize(fpath),
+                    "path": fpath
+                })
+    return {"files": files}
+
+@app.get("/api/v1/langchain/rag/files/{file_id}/download")
+async def rag_download_file(file_id: str):
+    fpath = os.path.join(_KB_FILES_DIR, file_id)
+    if not os.path.exists(fpath):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    orig_name = file_id.split("_", 1)[1] if "_" in file_id else file_id
+    from fastapi.responses import FileResponse
+    return FileResponse(fpath, filename=orig_name)
+
+@app.delete("/api/v1/langchain/rag/files/{file_id}")
+async def rag_delete_file(file_id: str):
+    fpath = os.path.join(_KB_FILES_DIR, file_id)
+    if not os.path.exists(fpath):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    os.remove(fpath)
+    return {"status": "ok"}
+
 @app.post("/api/v1/langchain/rag/query")
 async def rag_query(query: str = Query(...), provider: str = Query(None), top_k: int = Query(3), use_ai: bool = Query(False)):
     try:
@@ -1180,7 +1223,17 @@ async def rag_query(query: str = Query(...), provider: str = Query(None), top_k:
         results = rag.search(query, top_k)
         if not results:
             return {"answer": "", "sources": []}
-        sources = [{"content": r["content"][:200], "score": r["score"]} for r in results]
+        sources = []
+        for r in results:
+            source_path = r.get("metadata", {}).get("source", "")
+            fname = os.path.basename(source_path) if source_path else ""
+            orig_name = fname.split("_", 1)[1] if "_" in fname else fname
+            sources.append({
+                "content": r["content"][:200],
+                "score": r["score"],
+                "file_name": orig_name,
+                "file_id": fname
+            })
         answer = ""
         if use_ai:
             try:

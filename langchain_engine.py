@@ -722,9 +722,12 @@ class RAGEngine:
     """RAG 引擎"""
     
     def __init__(self, collection_dir: str = "./chroma_db"):
+        import threading
         self.collection_dir = collection_dir
         self.embeddings = None
         self.vectorstore = None
+        self._cleared = False
+        self._lock = threading.Lock()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=500, chunk_overlap=50, separators=["\n\n", "\n", "。", "！", "？", ".", "!", "?"]
         )
@@ -739,6 +742,7 @@ class RAGEngine:
     
     def add_text(self, text: str, metadata: dict = None) -> int:
         """添加文本到向量库"""
+        self._cleared = False
         self._ensure_vectorstore()
         docs = self.text_splitter.create_documents([text], metadatas=[metadata or {}])
         if self.vectorstore is None:
@@ -749,7 +753,6 @@ class RAGEngine:
     
     def add_file(self, file_path: str) -> int:
         """加载文件并添加到向量库"""
-        self._ensure_vectorstore()
         ext = os.path.splitext(file_path)[1].lower()
         loaders = {
             ".txt": lambda p: TextLoader(p, encoding="utf-8"),
@@ -766,9 +769,6 @@ class RAGEngine:
             ".xls": self._load_xlsx,
             ".pptx": self._load_pptx,
             ".ppt": self._load_pptx,
-            ".json": lambda p: TextLoader(p, encoding="utf-8"),
-            ".xml": lambda p: TextLoader(p, encoding="utf-8"),
-            ".log": lambda p: TextLoader(p, encoding="utf-8"),
         }
 
         if ext not in loaders:
@@ -785,10 +785,14 @@ class RAGEngine:
 
         chunks = self.text_splitter.split_documents(docs)
 
-        if self.vectorstore is None:
-            self.vectorstore = Chroma.from_documents(chunks, self._get_embeddings(), persist_directory=self.collection_dir)
-        else:
-            self.vectorstore.add_documents(chunks)
+        with self._lock:
+            if self._cleared:
+                self._cleared = False
+                self._ensure_vectorstore()
+            if self.vectorstore is None:
+                self.vectorstore = Chroma.from_documents(chunks, self._get_embeddings(), persist_directory=self.collection_dir)
+            else:
+                self.vectorstore.add_documents(chunks)
 
         return len(chunks)
 
@@ -831,6 +835,8 @@ class RAGEngine:
         return [Document(page_content="\n".join(texts), metadata={"source": path})]
     
     def _ensure_vectorstore(self):
+        if self._cleared:
+            return
         if self.vectorstore is None and os.path.exists(self.collection_dir) and os.listdir(self.collection_dir):
             try:
                 self.vectorstore = Chroma(persist_directory=self.collection_dir, embedding_function=self._get_embeddings())
@@ -839,11 +845,41 @@ class RAGEngine:
     
     def search(self, query: str, top_k: int = 3) -> List[Dict]:
         """检索相关文档"""
-        self._ensure_vectorstore()
-        if self.vectorstore is None:
+        if self._cleared:
             return []
-        results = self.vectorstore.similarity_search_with_score(query, k=top_k)
+        with self._lock:
+            self._ensure_vectorstore()
+            if self.vectorstore is None:
+                return []
+            results = self.vectorstore.similarity_search_with_score(query, k=top_k)
         return [{"content": doc.page_content, "score": float(score), "metadata": doc.metadata} for doc, score in results]
+    
+    def clear(self) -> bool:
+        """清空知识库所有数据"""
+        import chromadb, gc
+        self._cleared = True
+        with self._lock:
+            self.vectorstore = None
+            self.embeddings = None
+            if os.path.exists(self.collection_dir):
+                try:
+                    client = chromadb.PersistentClient(path=self.collection_dir)
+                    for col in client.list_collections():
+                        client.delete_collection(col.name)
+                    del client
+                    gc.collect()
+                except Exception:
+                    pass
+                import shutil, time
+                for attempt in range(5):
+                    try:
+                        shutil.rmtree(self.collection_dir)
+                        break
+                    except (PermissionError, OSError):
+                        time.sleep(1)
+                        gc.collect()
+                os.makedirs(self.collection_dir, exist_ok=True)
+        return True
     
     def rag_query(self, query: str, llm=None, top_k: int = 3) -> str:
         """RAG 查询：检索 + 生成"""
@@ -903,10 +939,12 @@ class RAGEngine:
     
     def get_stats(self) -> Dict:
         if self.vectorstore is not None:
-            return {"total_chunks": self.vectorstore._collection.count()}
+            try:
+                return {"total_chunks": self.vectorstore._collection.count()}
+            except Exception:
+                pass
         if os.path.exists(self.collection_dir) and os.listdir(self.collection_dir):
             try:
-                import chromadb
                 client = chromadb.PersistentClient(path=self.collection_dir)
                 collections = client.list_collections()
                 total = sum(c.count() for c in collections)

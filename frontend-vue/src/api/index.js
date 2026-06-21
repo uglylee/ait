@@ -280,6 +280,10 @@ export const ragQuery = (query, topK = 3, provider = null, useAi = false) => {
   if (provider) params.append('provider', provider)
   return api.post(`/langchain/rag/query?${params.toString()}`)
 }
+export const ragClear = () => api.post('/langchain/rag/clear')
 export const ragStatus = () => api.get('/langchain/status')
+export const ragListFiles = () => api.get('/langchain/rag/files')
+export const ragDownloadFile = (fileId) => `/api/v1/langchain/rag/files/${fileId}/download`
+export const ragDeleteFile = (fileId) => api.delete(`/langchain/rag/files/${fileId}`)
 
 export default api
