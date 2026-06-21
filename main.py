@@ -15,6 +15,18 @@ from orchestrator import Orchestrator
 
 app = FastAPI(title="AI应用通用框架", version="1.0.0")
 
+@app.on_event("startup")
+async def preload_embeddings():
+    def _load():
+        try:
+            from langchain_engine import get_rag_engine
+            rag = get_rag_engine()
+            rag._get_embeddings()
+            print("[STARTUP] Embedding model loaded")
+        except Exception as e:
+            print(f"[STARTUP] Embedding preload failed: {e}")
+    threading.Thread(target=_load, daemon=True).start()
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     import traceback
@@ -1127,42 +1139,55 @@ async def langchain_chat(request: ChatStreamRequest):
     return {"response": response}
 
 @app.post("/api/v1/langchain/rag/add")
-async def rag_add_text(text: str = Query(""), file: UploadFile = None):
+async def rag_add_text(text: str = Query(""), file: UploadFile = File(None), uploaded_files: List[UploadFile] = File(None)):
     from langchain_engine import get_rag_engine
     rag = get_rag_engine()
     try:
-        if file:
-            content = await file.read()
+        total_chunks = 0
+        all_files = []
+        if uploaded_files:
+            all_files = uploaded_files
+        elif file:
+            all_files = [file]
+        if all_files:
             import tempfile
-            fd, tmp_path = tempfile.mkstemp(suffix=os.path.splitext(file.filename or ".txt")[1])
-            try:
-                with os.fdopen(fd, 'wb') as tmp:
-                    tmp.write(content)
-                chunks = rag.add_file(tmp_path)
-            finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+            for upload_file in all_files:
+                content = await upload_file.read()
+                suffix = os.path.splitext(upload_file.filename or ".txt")[1]
+                fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+                try:
+                    with os.fdopen(fd, 'wb') as tmp:
+                        tmp.write(content)
+                    total_chunks += rag.add_file(tmp_path)
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
         elif text:
-            chunks = rag.add_text(text)
+            total_chunks = rag.add_text(text)
         else:
-            raise HTTPException(status_code=400, detail="需要text或file参数")
-        return {"status": "ok", "chunks_added": chunks, "stats": rag.get_stats()}
+            raise HTTPException(status_code=400, detail="需要text或files参数")
+        return {"status": "ok", "chunks_added": total_chunks, "stats": rag.get_stats()}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/langchain/rag/query")
-async def rag_query(query: str = Query(...), provider: str = Query(None), top_k: int = Query(3)):
+async def rag_query(query: str = Query(...), provider: str = Query(None), top_k: int = Query(3), use_ai: bool = Query(False)):
     try:
         from langchain_engine import get_rag_engine
         rag = get_rag_engine()
         results = rag.search(query, top_k)
         if not results:
-            return {"answer": "知识库中暂无相关内容", "sources": []}
+            return {"answer": "", "sources": []}
         sources = [{"content": r["content"][:200], "score": r["score"]} for r in results]
-        try:
-            answer = rag.rag_query(query, top_k=top_k)
-        except Exception as e:
-            answer = "知识检索完成，但AI生成回答失败。相关片段已列出。"
+        answer = ""
+        if use_ai:
+            try:
+                llm = get_llm_router()
+                answer = rag.rag_query(query, llm=llm, top_k=top_k)
+            except Exception as e:
+                answer = "AI生成回答失败，相关片段已列出。"
         return {"answer": answer, "sources": sources}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

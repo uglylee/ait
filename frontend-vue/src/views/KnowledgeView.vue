@@ -28,18 +28,21 @@
               <el-upload
                 ref="uploadRef"
                 drag
+                multiple
                 :auto-upload="false"
                 :on-change="handleFileChange"
                 :before-upload="() => false"
-                accept=".txt,.pdf,.csv,.md"
-                :limit="1"
+                accept=".txt,.pdf,.csv,.md,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.html,.htm,.json,.xml,.log"
               >
                 <el-icon :size="40" style="color:#909399"><UploadFilled /></el-icon>
                 <div style="margin-top:8px;color:#606266">拖拽文件到此处，或<em>点击上传</em></div>
-                <div style="font-size:12px;color:#909399;margin-top:4px">支持 .txt .pdf .csv .md</div>
+                <div style="font-size:12px;color:#909399;margin-top:4px">支持批量上传：PDF Word Excel PPT TXT CSV HTML Markdown JSON XML</div>
               </el-upload>
-              <el-button type="primary" style="width:100%;margin-top:12px" :loading="uploading" @click="uploadFile" :disabled="!pendingFile">
-                上传到知识库
+              <div v-if="pendingFiles.length" style="margin-top:8px;font-size:12px;color:#606266">
+                已选择 {{ pendingFiles.length }} 个文件
+              </div>
+              <el-button type="primary" style="width:100%;margin-top:12px" :loading="uploading" @click="uploadFile" :disabled="!pendingFiles.length">
+                {{ uploading ? uploadProgress : '上传到知识库' }}
               </el-button>
 
               <el-divider />
@@ -64,6 +67,9 @@
                 <el-button :loading="searching" @click="search">检索</el-button>
               </template>
             </el-input>
+            <div style="margin-bottom:12px">
+              <el-switch v-model="useAI" active-text="AI 回答" inactive-text="仅检索" />
+            </div>
             <div v-if="searchError" style="margin-bottom:12px">
               <el-alert :title="searchError" type="error" show-icon :closable="false" />
             </div>
@@ -94,14 +100,16 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Loading, UploadFilled } from '@element-plus/icons-vue'
-import { ragStatus, ragAddText, ragAddFile, ragQuery } from '../api'
+import { ragStatus, ragAddText, ragAddFiles, ragQuery } from '../api'
 
 const loading = ref(true)
 const stats = ref({})
 const statusOk = ref(false)
+const uploadRef = ref(null)
 
-const pendingFile = ref(null)
+const pendingFiles = ref([])
 const uploading = ref(false)
+const uploadProgress = ref('')
 const addText = ref('')
 const adding = ref(false)
 
@@ -110,6 +118,7 @@ const searching = ref(false)
 const results = ref([])
 const ragAnswer = ref('')
 const searchError = ref('')
+const useAI = ref(false)
 
 const fetchStatus = async () => {
   loading.value = true
@@ -124,23 +133,29 @@ const fetchStatus = async () => {
   }
 }
 
-const handleFileChange = (file) => {
-  pendingFile.value = file.raw
+const handleFileChange = (file, fileList) => {
+  pendingFiles.value = fileList.map(f => f.raw)
 }
 
 const uploadFile = async () => {
-  if (!pendingFile.value) return
+  if (!pendingFiles.value.length) return
   uploading.value = true
   try {
-    const res = await ragAddFile(pendingFile.value)
-    ElMessage.success(`上传成功，新增 ${res.data.chunks_added} 个片段`)
-    pendingFile.value = null
-    stats.value = res.data.stats || {}
+    let totalChunks = 0
+    for (let i = 0; i < pendingFiles.value.length; i++) {
+      uploadProgress.value = `上传中 (${i + 1}/${pendingFiles.value.length})...`
+      const res = await ragAddFiles([pendingFiles.value[i]])
+      totalChunks += res.data.chunks_added || 0
+    }
+    ElMessage.success(`上传成功，新增 ${totalChunks} 个片段`)
+    pendingFiles.value = []
+    uploadRef.value?.clearFiles()
     await fetchStatus()
   } catch (e) {
     ElMessage.error('上传失败: ' + (e.response?.data?.detail || e.message))
   } finally {
     uploading.value = false
+    uploadProgress.value = ''
   }
 }
 
@@ -166,7 +181,7 @@ const search = async () => {
   ragAnswer.value = ''
   searchError.value = ''
   try {
-    const res = await ragQuery(query.value)
+    const res = await ragQuery(query.value, 3, null, useAI.value)
     ragAnswer.value = res.data.answer || ''
     results.value = res.data.sources || []
     if (!results.value.length && !ragAnswer.value) {

@@ -267,13 +267,16 @@ export const ragAddText = (text, metadata) => {
   if (text) params.append('text', text)
   return api.post(`/langchain/rag/add?${params.toString()}`, null)
 }
-export const ragAddFile = (file) => {
+export const ragAddFiles = (files) => {
   const formData = new FormData()
-  formData.append('file', file)
-  return api.post('/langchain/rag/add', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+  for (const file of files) {
+    formData.append('uploaded_files', file)
+  }
+  return api.post('/langchain/rag/add', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })
 }
-export const ragQuery = (query, topK = 3, provider = null) => {
-  const params = new URLSearchParams({ query, top_k: topK })
+export const ragAddFile = (file) => ragAddFiles([file])
+export const ragQuery = (query, topK = 3, provider = null, useAi = false) => {
+  const params = new URLSearchParams({ query, top_k: topK, use_ai: useAi })
   if (provider) params.append('provider', provider)
   return api.post(`/langchain/rag/query?${params.toString()}`)
 }

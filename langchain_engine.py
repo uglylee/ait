@@ -12,7 +12,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_community.document_loaders import (
-    TextLoader, PyPDFLoader, CSVLoader, UnstructuredMarkdownLoader
+    TextLoader, PyPDFLoader, CSVLoader
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
@@ -755,22 +755,80 @@ class RAGEngine:
             ".txt": lambda p: TextLoader(p, encoding="utf-8"),
             ".pdf": lambda p: PyPDFLoader(p),
             ".csv": lambda p: CSVLoader(p),
-            ".md": lambda p: UnstructuredMarkdownLoader(p),
+            ".md": lambda p: TextLoader(p, encoding="utf-8"),
+            ".html": lambda p: TextLoader(p, encoding="utf-8"),
+            ".htm": lambda p: TextLoader(p, encoding="utf-8"),
+            ".json": lambda p: TextLoader(p, encoding="utf-8"),
+            ".xml": lambda p: TextLoader(p, encoding="utf-8"),
+            ".log": lambda p: TextLoader(p, encoding="utf-8"),
+            ".docx": self._load_docx,
+            ".xlsx": self._load_xlsx,
+            ".xls": self._load_xlsx,
+            ".pptx": self._load_pptx,
+            ".ppt": self._load_pptx,
+            ".json": lambda p: TextLoader(p, encoding="utf-8"),
+            ".xml": lambda p: TextLoader(p, encoding="utf-8"),
+            ".log": lambda p: TextLoader(p, encoding="utf-8"),
         }
-        
+
         if ext not in loaders:
-            raise ValueError(f"不支持的文件格式: {ext}")
-        
-        loader = loaders[ext](file_path)
-        docs = loader.load()
+            try:
+                loader = TextLoader(file_path, encoding="utf-8")
+                docs = loader.load()
+            except Exception:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    from langchain_core.documents import Document
+                    docs = [Document(page_content=f.read(), metadata={"source": file_path})]
+        else:
+            loader = loaders[ext](file_path)
+            docs = loader.load() if callable(getattr(loader, "load", None)) else loader
+
         chunks = self.text_splitter.split_documents(docs)
-        
+
         if self.vectorstore is None:
             self.vectorstore = Chroma.from_documents(chunks, self._get_embeddings(), persist_directory=self.collection_dir)
         else:
             self.vectorstore.add_documents(chunks)
-        
+
         return len(chunks)
+
+    def add_files(self, file_paths: list) -> int:
+        """批量添加文件"""
+        total = 0
+        for fp in file_paths:
+            total += self.add_file(fp)
+        return total
+
+    def _load_docx(self, path):
+        from langchain_core.documents import Document
+        from docx import Document as DocxDocument
+        doc = DocxDocument(path)
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        return [Document(page_content="\n".join(paragraphs), metadata={"source": path})]
+
+    def _load_xlsx(self, path):
+        from langchain_core.documents import Document
+        import openpyxl
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        texts = []
+        for ws in wb.worksheets:
+            for row in ws.iter_rows(values_only=True):
+                line = " | ".join(str(c) if c is not None else "" for c in row)
+                if line.strip():
+                    texts.append(line)
+        wb.close()
+        return [Document(page_content="\n".join(texts), metadata={"source": path})]
+
+    def _load_pptx(self, path):
+        from langchain_core.documents import Document
+        from pptx import Presentation
+        prs = Presentation(path)
+        texts = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    texts.append(shape.text_frame.text)
+        return [Document(page_content="\n".join(texts), metadata={"source": path})]
     
     def _ensure_vectorstore(self):
         if self.vectorstore is None and os.path.exists(self.collection_dir) and os.listdir(self.collection_dir):
@@ -802,27 +860,60 @@ class RAGEngine:
 问题: {query}
 回答:"""
         
-        import httpx
-        import os
-        from dotenv import load_dotenv
-        load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
-        api_key = os.getenv("AGNES_API_KEY", "")
-        base_url = os.getenv("AGNES_BASE_URL", "https://apihub.agnes-ai.com")
-        model = os.getenv("AGNES_MODEL", "agnes-2.0-flash")
-        with httpx.Client(timeout=60.0) as client:
-            resp = client.post(
-                f"{base_url}/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 1024}
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+        if llm is None:
+            try:
+                from llm_config import get_llm_router
+                llm = get_llm_router()
+            except Exception:
+                pass
+        
+        if llm is None:
+            return "LLM 未配置，无法生成回答。"
+        
+        provider_name = getattr(llm, 'default_provider', None)
+        
+        import asyncio, threading
+        result_container = [None]
+        error_container = [None]
+
+        def _run():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                async def _call():
+                    r = ""
+                    async for chunk in llm.chat_stream([{"role": "user", "content": prompt}], provider=provider_name, enable_thinking=False):
+                        if chunk == "[DONE]" or (isinstance(chunk, str) and chunk.startswith('{"type"')):
+                            continue
+                        r += chunk
+                    return r
+                result_container[0] = new_loop.run_until_complete(_call())
+            except Exception as e:
+                error_container[0] = str(e)
+            finally:
+                new_loop.close()
+
+        t = threading.Thread(target=_run)
+        t.start()
+        t.join(timeout=60)
+
+        if error_container[0]:
+            return f"AI 生成失败: {error_container[0]}"
+        return result_container[0] or "AI 未返回内容。"
     
     def get_stats(self) -> Dict:
-        self._ensure_vectorstore()
-        if self.vectorstore is None:
-            return {"total_chunks": 0}
-        return {"total_chunks": self.vectorstore._collection.count()}
+        if self.vectorstore is not None:
+            return {"total_chunks": self.vectorstore._collection.count()}
+        if os.path.exists(self.collection_dir) and os.listdir(self.collection_dir):
+            try:
+                import chromadb
+                client = chromadb.PersistentClient(path=self.collection_dir)
+                collections = client.list_collections()
+                total = sum(c.count() for c in collections)
+                return {"total_chunks": total}
+            except Exception:
+                pass
+        return {"total_chunks": 0}
 
 
 # ============ 6. 文档处理工具 ============
