@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -140,6 +141,69 @@ def get_run(run_id: str) -> Optional[Dict]:
     return doc
 
 
+_running_workflows = {}
+_cancel_events = {}
+_cancelled_run_ids = set()
+_redis_client = None
+
+
+def _get_redis():
+    global _redis_client
+    if _redis_client is None:
+        try:
+            import redis
+            _redis_client = redis.Redis(
+                host="localhost", port=6379, password="ai_redis_2024",
+                decode_responses=True, socket_connect_timeout=2
+            )
+            _redis_client.ping()
+        except Exception:
+            _redis_client = False
+    return _redis_client
+
+
+def cancel_workflow(run_id: str) -> bool:
+    _cancelled_run_ids.add(run_id)
+    if run_id in _cancel_events:
+        _cancel_events[run_id].set()
+    r = _get_redis()
+    if r:
+        try:
+            r.set(f"wf:cancel:{run_id}", "1", ex=600)
+        except Exception:
+            pass
+    return True
+
+
+def _is_cancelled(run_id: str) -> bool:
+    if run_id in _cancelled_run_ids:
+        return True
+    r = _get_redis()
+    if r:
+        try:
+            if r.get(f"wf:cancel:{run_id}") == "1":
+                _cancelled_run_ids.add(run_id)
+                return True
+        except Exception:
+            pass
+    evt = _cancel_events.get(run_id)
+    if evt and evt.is_set():
+        return True
+    return _running_workflows.get(run_id, False)
+
+
+def _cleanup_run(run_id: str):
+    _running_workflows.pop(run_id, None)
+    _cancelled_run_ids.discard(run_id)
+    _cancel_events.pop(run_id, None)
+    r = _get_redis()
+    if r:
+        try:
+            r.delete(f"wf:cancel:{run_id}")
+        except Exception:
+            pass
+
+
 def _topological_sort(nodes: List[dict], edges: List[dict]) -> List[List[str]]:
     in_degree = {n["id"]: 0 for n in nodes}
     children = {n["id"]: [] for n in nodes}
@@ -205,7 +269,7 @@ def _replace_vars(template: str, context: dict) -> str:
     return re.sub(r"\{\{(.+?)\}\}", _replacer, template)
 
 
-def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
+def _execute_node(node: dict, context: dict, llm_router=None, cancel_event=None) -> Any:
     ntype = node["type"]
     config = node.get("config", {})
 
@@ -215,6 +279,8 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
     elif ntype == "llm":
         if not llm_router:
             return {"error": "LLM router not available"}
+        if cancel_event and cancel_event.is_set():
+            return {"error": "用户取消"}
         provider = config.get("provider", "agnes")
         prompt = config.get("prompt", "")
         messages = []
@@ -226,7 +292,6 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
             messages.append({"role": "user", "content": str(user_input)})
 
         import asyncio
-        import threading
 
         result_container = [None]
         error_container = [None]
@@ -237,7 +302,9 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
             try:
                 async def _call():
                     result = ""
-                    async for chunk in llm_router.chat_stream(messages, provider=provider):
+                    async for chunk in llm_router.chat_stream(messages, provider=provider, enable_thinking=False):
+                        if cancel_event and cancel_event.is_set():
+                            raise Exception("用户取消")
                         if chunk == "[DONE]":
                             continue
                         if chunk.startswith('{"type": "reasoning"'):
@@ -252,10 +319,18 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
 
         t = threading.Thread(target=_run_in_thread)
         t.start()
-        t.join(timeout=120)
-
+        _wait_start = __import__('time').time()
+        while t.is_alive():
+            t.join(timeout=2)
+            if cancel_event and cancel_event.is_set():
+                t.join(timeout=1)
+                return {"error": "用户取消"}
+            if __import__('time').time() - _wait_start > 120:
+                return {"error": "LLM 调用超时 (120秒)，请检查网络或 provider 配置"}
         if error_container[0]:
             return {"error": error_container[0]}
+        if result_container[0] is None:
+            return {"error": "LLM 返回空内容，请检查 provider 配置和 API 密钥"}
         return {"response": result_container[0]}
 
     elif ntype == "tool":
@@ -388,26 +463,38 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
         elif tool_name == "run_command":
             import subprocess
             import platform
+            import time as _time
             cmd = tool_input
             if not cmd:
                 return {"error": "命令为空"}
             timeout_val = int(config.get("timeout", 30))
             system = platform.system().lower()
             try:
-                proc = subprocess.run(cmd, shell=True, capture_output=True, timeout=timeout_val)
-                stdout = proc.stdout
-                stderr = proc.stderr
+                proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                _start = _time.time()
+                while proc.poll() is None:
+                    if cancel_event and cancel_event.is_set():
+                        proc.kill()
+                        proc.wait()
+                        return {"error": "用户取消"}
+                    if _time.time() - _start > timeout_val:
+                        proc.kill()
+                        proc.wait()
+                        return {"result": "", "stdout": "", "stderr": "命令执行超时", "returncode": -1}
+                    _time.sleep(0.5)
+                stdout = proc.stdout.read()
+                stderr = proc.stderr.read()
                 if system == "windows":
                     for enc in ["gbk", "gb2312", "utf-8", "latin-1"]:
                         try:
-                            stdout = proc.stdout.decode(enc)
-                            stderr = proc.stderr.decode(enc)
+                            stdout = stdout.decode(enc)
+                            stderr = stderr.decode(enc)
                             break
                         except (UnicodeDecodeError, LookupError):
                             continue
                 else:
-                    stdout = proc.stdout.decode("utf-8", errors="replace")
-                    stderr = proc.stderr.decode("utf-8", errors="replace")
+                    stdout = stdout.decode("utf-8", errors="replace")
+                    stderr = stderr.decode("utf-8", errors="replace")
                 output = stdout[:5000]
                 return {
                     "result": output,
@@ -918,7 +1005,7 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
         text = _replace_vars(config.get("text", "{{input}}"), context)
         target_lang = config.get("target_lang", "英语")
         prompt = f"将以下文本翻译为{target_lang}，只输出翻译结果：\n{text}"
-        import asyncio, threading
+        import asyncio
         result_container = [None]
         error_container = [None]
         def _run():
@@ -948,7 +1035,7 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
         text = _replace_vars(config.get("text", "{{input}}"), context)
         max_length = config.get("max_length", 200)
         prompt = f"用中文总结以下内容，不超过{max_length}字：\n{text[:3000]}"
-        import asyncio, threading
+        import asyncio
         result_container = [None]
         error_container = [None]
         def _run():
@@ -1625,6 +1712,7 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
                 if y < 50:
                     c.showPage()
                     y = height - 50
+                    c.setFont(_body_font, 11)
                 c.drawString(50, y, line[:100])
                 y -= 16
             c.save()
@@ -1901,7 +1989,7 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
         if not llm_router:
             return {"error": "LLM router not available"}
         prompt = f"分析以下文本的情感倾向，只回答一个词：正面/负面/中性\n文本：{text[:2000]}"
-        import asyncio, threading
+        import asyncio
         result_container = [None]
         error_container = [None]
         def _run():
@@ -2281,21 +2369,30 @@ def delete_version(workflow_id: str, version: int) -> bool:
     return result.deleted_count > 0
 
 
-def run_workflow(workflow_id: str, inputs: Dict[str, Any] = None, llm_router=None) -> WorkflowRun:
+def run_workflow(workflow_id: str, inputs: Dict[str, Any] = None, llm_router=None, progress_callback=None) -> WorkflowRun:
     wf_data = get_workflow(workflow_id)
     if not wf_data:
         raise ValueError(f"Workflow {workflow_id} not found")
 
     run = WorkflowRun(workflow_id=workflow_id, inputs=inputs or {})
     save_run(run)
+    _running_workflows[run.id] = False
+    _cancel_events[run.id] = threading.Event()
 
     nodes = wf_data.get("nodes", [])
     edges = wf_data.get("edges", [])
+
+    def _emit(event_type, node_id, data=None):
+        if progress_callback:
+            progress_callback({"type": event_type, "node_id": node_id, **(data or {})})
+
+    _emit("start", run.id, {"workflow_id": workflow_id})
 
     if not nodes:
         run.status = "completed"
         run.finished_at = datetime.now().isoformat()
         update_run(run)
+        _emit("done", run.id, {"status": "completed"})
         return run
 
     levels = _topological_sort(nodes, edges)
@@ -2306,25 +2403,61 @@ def run_workflow(workflow_id: str, inputs: Dict[str, Any] = None, llm_router=Non
             if k not in context:
                 context[k] = v
 
+    cancel_event = _cancel_events.get(run.id)
+
     for level in levels:
         for node_id in level:
+            if _is_cancelled(run.id):
+                run.status = "cancelled"
+                run.error = "用户手动取消"
+                run.finished_at = datetime.now().isoformat()
+                _cleanup_run(run.id)
+                update_run(run)
+                _emit("done", run.id, {"status": "cancelled", "error": "用户手动取消"})
+                return run
             node = node_map.get(node_id)
             if not node:
                 continue
+            label = node.get("label", node_id)
+            _emit("node_start", node_id, {"label": label})
             try:
-                result = _execute_node(node, context, llm_router)
+                result = _execute_node(node, context, llm_router, cancel_event=cancel_event)
+                if cancel_event and cancel_event.is_set():
+                    run.status = "cancelled"
+                    run.error = "用户手动取消"
+                    run.finished_at = datetime.now().isoformat()
+                    run.node_results[node_id] = {"status": "cancelled", "error": "用户取消"}
+                    _cleanup_run(run.id)
+                    update_run(run)
+                    _emit("node_error", node_id, {"label": label, "error": "用户取消"})
+                    _emit("done", run.id, {"status": "cancelled", "error": "用户手动取消"})
+                    return run
                 context[node_id] = result
                 if isinstance(result, dict):
+                    if "error" in result:
+                        run.node_results[node_id] = {"status": "failed", "error": result["error"]}
+                        run.status = "failed"
+                        run.error = result["error"]
+                        run.finished_at = datetime.now().isoformat()
+                        _cleanup_run(run.id)
+                        update_run(run)
+                        _emit("node_error", node_id, {"label": label, "error": result["error"]})
+                        _emit("done", run.id, {"status": "failed", "error": result["error"]})
+                        return run
                     for k, v in result.items():
                         if k not in context:
                             context[k] = v
                 run.node_results[node_id] = {"status": "completed", "result": result}
+                _emit("node_done", node_id, {"label": label, "result": result})
             except Exception as e:
                 run.node_results[node_id] = {"status": "failed", "error": str(e)}
                 run.status = "failed"
                 run.error = str(e)
                 run.finished_at = datetime.now().isoformat()
+                _cleanup_run(run.id)
                 update_run(run)
+                _emit("node_error", node_id, {"label": label, "error": str(e)})
+                _emit("done", run.id, {"status": "failed", "error": str(e)})
                 return run
 
     clean_outputs = {}
@@ -2346,5 +2479,7 @@ def run_workflow(workflow_id: str, inputs: Dict[str, Any] = None, llm_router=Non
     run.outputs = clean_outputs
     run.status = "completed"
     run.finished_at = datetime.now().isoformat()
+    _cleanup_run(run.id)
     update_run(run)
+    _emit("done", run.id, {"status": "completed"})
     return run

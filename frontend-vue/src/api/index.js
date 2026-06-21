@@ -226,7 +226,31 @@ export const createWorkflow = (data) => api.post('/workflows', data)
 export const getWorkflow = (id) => api.get(`/workflows/${id}`)
 export const updateWorkflow = (id, data) => api.put(`/workflows/${id}`, data)
 export const deleteWorkflow = (id) => api.delete(`/workflows/${id}`)
-export const runWorkflow = (id, inputs = {}) => api.post(`/workflows/${id}/run`, { inputs })
+export const runWorkflow = (id, inputs = {}) => api.post(`/workflows/${id}/run`, { inputs }, { timeout: 300000 })
+export const runWorkflowStream = async (id, inputs, onEvent, signal) => {
+  const resp = await fetch(`/api/v1/workflows/${id}/run-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ inputs }),
+    signal
+  })
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const text = decoder.decode(value)
+    const lines = text.split('\n')
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const event = JSON.parse(line.slice(6))
+          onEvent(event)
+        } catch {}
+      }
+    }
+  }
+}
 export const getWorkflowRuns = (id) => api.get(`/workflows/${id}/runs`)
 export const getWorkflowRun = (runId) => api.get(`/workflow-runs/${runId}`)
 export const exportWorkflow = (id) => api.get(`/workflows/${id}/export`)

@@ -1114,6 +1114,9 @@
               <el-form-item label="授权码">
                 <el-input v-model="selectedNode.data.config.smtp_pass" type="password" show-password placeholder="SMTP授权码" />
               </el-form-item>
+              <el-form-item>
+                <el-button type="primary" size="small" :loading="smtpTesting" @click="testSmtpConnection">测试连接</el-button>
+              </el-form-item>
               <el-form-item label="收件人">
                 <el-input v-model="selectedNode.data.config.to_addr" placeholder="recipient@example.com" />
               </el-form-item>
@@ -1127,8 +1130,8 @@
                 <el-switch v-model="selectedNode.data.config.is_html" />
               </el-form-item>
               <el-form-item label="附件路径">
-                <el-input v-model="selectedNode.data.config.attachments" type="textarea" :rows="2" placeholder="文件路径，多个用逗号分隔&#10;支持: {{n3.path}}, {{n4.result.path}}" />
-                <div style="font-size:11px;color:#909399;margin-top:4px">引用上游节点生成的文件，如 {{节点ID.path}}</div>
+                <el-input v-model="selectedNode.data.config.attachments" type="textarea" :rows="2" placeholder="文件路径，多个用逗号分隔" />
+                <div style="font-size:11px;color:#909399;margin-top:4px">引用上游文件，如 <code v-html="'{{n3.path}}'"></code></div>
               </el-form-item>
             </template>
             <template v-if="selectedNode.type === 'excel_write'">
@@ -1377,7 +1380,8 @@
           <div v-for="(res, nid) in viewingRunDetail.node_results" :key="nid" class="node-result-item">
             <div class="node-result-header">
               <span class="node-result-status" :class="getStatusClass(res)">{{ getStatusIcon(res) }}</span>
-              <span class="node-result-id">{{ nid }}</span>
+              <span class="node-result-id">{{ getNodeLabel(nid) }}</span>
+              <span class="node-result-id" style="color:#909399;font-size:11px">({{ nid }})</span>
             </div>
             <div v-if="res && res.error" class="node-result-error">{{ res.error }}</div>
             <div v-else-if="res && res.result" class="node-result-output">{{ truncate(JSON.stringify(res.result), 300) }}</div>
@@ -1473,7 +1477,7 @@
     </el-dialog>
 
     <!-- 执行输入对话框 -->
-    <el-dialog v-model="showRunDialog" title="执行工作流" width="600px">
+    <el-dialog v-model="showRunDialog" title="执行工作流" width="600px" :close-on-click-modal="false" @close="closeRunDialog">
       <el-tabs v-model="runInputMode">
         <el-tab-pane label="表单输入" name="form">
           <el-form label-position="top" size="small">
@@ -1490,26 +1494,37 @@
           </el-form>
         </el-tab-pane>
       </el-tabs>
-      <div v-if="runResult">
+      <div v-if="runProgress.length || runResult">
         <el-divider />
-        <div style="font-size:13px;color:#606266;margin-bottom:8px">执行结果</div>
-        <el-tag :type="runResult.status === 'completed' ? 'success' : 'danger'" size="small" style="margin-bottom:8px">{{ runResult.status }}</el-tag>
-        <div v-if="runResult.node_results" class="node-results-tree">
+        <div style="font-size:13px;color:#606266;margin-bottom:8px">{{ running ? '执行进度' : '执行结果' }}</div>
+        <div v-if="running" class="node-results-tree">
+          <div v-for="item in runProgress" :key="item.id" class="node-result-item">
+            <div class="node-result-header">
+              <span class="node-result-status" :class="item.status === 'completed' ? 'success' : item.status === 'failed' ? 'error' : item.status === 'running' ? 'running' : 'pending'">{{ item.status === 'completed' ? '✅' : item.status === 'failed' ? '❌' : item.status === 'running' ? '⏳' : '⏸️' }}</span>
+              <span class="node-result-id">{{ getNodeLabel(item.id) }}</span>
+              <span class="node-result-id" style="color:#909399;font-size:11px">({{ item.id }})</span>
+              <span v-if="currentNodeId === item.id" style="color:#409eff;font-size:11px;margin-left:auto;animation:pulse 1s infinite">执行中...</span>
+            </div>
+            <div v-if="item.error" class="node-result-error">{{ item.error }}</div>
+            <div v-else-if="item.result" class="node-result-output">{{ truncate(JSON.stringify(item.result), 200) }}</div>
+          </div>
+        </div>
+        <div v-else-if="runResult && runResult.node_results" class="node-results-tree">
           <div v-for="(res, nid) in runResult.node_results" :key="nid" class="node-result-item">
             <div class="node-result-header">
               <span class="node-result-status" :class="getStatusClass(res)">{{ getStatusIcon(res) }}</span>
-              <span class="node-result-id">{{ nid }}</span>
-              <span v-if="res && res.elapsed" class="node-result-time">{{ res.elapsed }}ms</span>
+              <span class="node-result-id">{{ getNodeLabel(nid) }}</span>
+              <span class="node-result-id" style="color:#909399;font-size:11px">({{ nid }})</span>
             </div>
             <div v-if="res && res.error" class="node-result-error">{{ res.error }}</div>
             <div v-else-if="res && res.result" class="node-result-output">{{ truncate(JSON.stringify(res.result), 200) }}</div>
           </div>
         </div>
-        <pre v-else style="background:#f5f7fa;padding:12px;border-radius:6px;font-size:12px;max-height:300px;overflow:auto;white-space:pre-wrap">{{ JSON.stringify(runResult.outputs || runResult, null, 2) }}</pre>
       </div>
       <template #footer>
-        <el-button @click="showRunDialog = false">关闭</el-button>
-        <el-button type="primary" :loading="running" @click="doRun">执行</el-button>
+        <el-button @click="closeRunDialog">关闭</el-button>
+        <el-button v-if="running" type="warning" :loading="stopping" @click="stopRun">{{ stopping ? '停止中...' : '停止' }}</el-button>
+        <el-button type="primary" :loading="running && !stopping" @click="doRun">执行</el-button>
       </template>
     </el-dialog>
 
@@ -1607,7 +1622,7 @@ import { Background } from '@vue-flow/background'
 import { MiniMap } from '@vue-flow/minimap'
 import { Controls } from '@vue-flow/controls'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getWorkflows, createWorkflow as apiCreate, getWorkflow, updateWorkflow as apiUpdate, deleteWorkflow as apiDelete, runWorkflow as apiRun, getWorkflowRuns, exportWorkflow as apiExport, importWorkflow as apiImport, saveWorkflowVersion as apiSaveVersion, getWorkflowVersions as apiGetVersions, restoreWorkflowVersion as apiRestoreVersion, deleteWorkflowVersion as apiDeleteVersion } from '../api'
+import { getWorkflows, createWorkflow as apiCreate, getWorkflow, updateWorkflow as apiUpdate, deleteWorkflow as apiDelete, runWorkflow as apiRun, runWorkflowStream, getWorkflowRuns, exportWorkflow as apiExport, importWorkflow as apiImport, saveWorkflowVersion as apiSaveVersion, getWorkflowVersions as apiGetVersions, restoreWorkflowVersion as apiRestoreVersion, deleteWorkflowVersion as apiDeleteVersion } from '../api'
 
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -1812,6 +1827,10 @@ const runInputs = ref('{\n  "input": "测试输入"\n}')
 const runResult = ref(null)
 const running = ref(false)
 const runTarget = ref(null)
+const runProgress = ref([])
+const currentNodeId = ref('')
+const currentRunId = ref('')
+const stopping = ref(false)
 
 const showRunsDialog = ref(false)
 const runLogs = ref([])
@@ -1835,6 +1854,40 @@ const viewRunDetail = async (run) => {
 const showAiDialog = ref(false)
 const aiDescription = ref('')
 const aiGenerating = ref(false)
+const smtpTesting = ref(false)
+
+const testSmtpConnection = async () => {
+  if (!selectedNode.value) return
+  const cfg = selectedNode.value.data.config
+  if (!cfg.smtp_host || !cfg.smtp_user || !cfg.smtp_pass) {
+    return ElMessage.warning('请先填写SMTP服务器、账号和授权码')
+  }
+  smtpTesting.value = true
+  try {
+    const resp = await fetch('/api/v1/tools/test-smtp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        smtp_host: cfg.smtp_host,
+        smtp_port: cfg.smtp_port || 465,
+        smtp_user: cfg.smtp_user,
+        smtp_pass: cfg.smtp_pass,
+        use_ssl: cfg.use_ssl !== false,
+        to_addr: cfg.to_addr || ''
+      })
+    })
+    const res = await resp.json()
+    if (resp.ok) {
+      ElMessage.success(res.message || '连接成功')
+    } else {
+      ElMessage.error(res.detail || '连接失败')
+    }
+  } catch (e) {
+    ElMessage.error('请求失败: ' + e.message)
+  } finally {
+    smtpTesting.value = false
+  }
+}
 
 const generateByAI = async () => {
   if (!aiDescription.value.trim()) return ElMessage.warning('请输入需求描述')
@@ -2273,6 +2326,10 @@ const getStatusIcon = (res) => {
   return '✅'
 }
 const truncate = (str, len) => str && str.length > len ? str.slice(0, len) + '...' : str
+const getNodeLabel = (nid) => {
+  const node = nodes.value.find(n => n.id === nid)
+  return node?.data?.label || nid
+}
 
 const runWf = () => {
   runFormInput.value = ''
@@ -2331,21 +2388,79 @@ const runWorkflowDialog = (wf) => {
   showRunDialog.value = true
 }
 
+let runAbortController = null
+
 const doRun = async () => {
   if (!runTarget.value) return
   running.value = true
+  stopping.value = false
+  runResult.value = null
+  runProgress.value = []
+  currentNodeId.value = ''
+  currentRunId.value = ''
+  runAbortController = new AbortController()
   try {
     let inputs = {}
     if (runInputMode.value === 'form') {
       inputs = { input: runFormInput.value }
     } else {
-    try { inputs = JSON.parse(runInputs.value) } catch (e) { ElMessage.warning('JSON 格式错误'); running.value = false; return }
+      try { inputs = JSON.parse(runInputs.value) } catch (e) { ElMessage.warning('JSON 格式错误'); running.value = false; return }
+    }
+    await runWorkflowStream(runTarget.value.id || runTarget.value._id, inputs, (event) => {
+      if (event.type === 'start') {
+        currentRunId.value = event.node_id
+        runProgress.value = []
+      } else if (event.type === 'node_start') {
+        currentNodeId.value = event.node_id
+        runProgress.value.push({ id: event.node_id, label: event.label, status: 'running' })
+      } else if (event.type === 'node_done') {
+        const item = runProgress.value.find(p => p.id === event.node_id)
+        if (item) { item.status = 'completed'; item.result = event.result }
+      } else if (event.type === 'node_error') {
+        const item = runProgress.value.find(p => p.id === event.node_id)
+        if (item) { item.status = 'failed'; item.error = event.error }
+      } else if (event.type === 'done') {
+        currentNodeId.value = ''
+        if (event.status === 'cancelled') stopping.value = false
+      }
+    }, runAbortController.signal)
+    runResult.value = { status: 'completed', node_results: Object.fromEntries(runProgress.value.map(p => [p.id, { status: p.status, result: p.result, error: p.error }])) }
+    const failed = runProgress.value.filter(p => p.status === 'failed')
+    if (stopping.value) {
+      ElMessage.warning('执行已取消')
+    } else if (failed.length) {
+      ElMessage.error('执行失败: ' + failed.map(f => f.error).join('; '))
+    } else {
+      ElMessage.success('执行完成')
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      if (stopping.value) ElMessage.warning('执行已取消')
+    } else {
+      const msg = e.response?.data?.detail || e.message || '请求失败'
+      ElMessage.error('执行失败: ' + msg)
+    }
+  } finally { running.value = false; stopping.value = false; currentNodeId.value = ''; currentRunId.value = ''; runAbortController = null }
 }
-    const { data } = await apiRun(runTarget.value.id || runTarget.value._id, inputs)
-    runResult.value = data
-    ElMessage.success('执行完成')
-  } catch (e) { ElMessage.error('执行失败') } finally { running.value = false }
+
+const stopRun = async () => {
+  stopping.value = true
+  if (currentRunId.value) {
+    fetch(`/api/v1/workflow-runs/${currentRunId.value}/cancel`, { method: 'POST' }).catch(() => {})
+  }
+  if (runAbortController) runAbortController.abort()
 }
+
+const closeRunDialog = () => {
+  if (running.value) stopRun()
+  showRunDialog.value = false
+}
+
+window.addEventListener('beforeunload', () => {
+  if (running.value && currentRunId.value) {
+    navigator.sendBeacon(`/api/v1/workflow-runs/${currentRunId.value}/cancel`)
+  }
+})
 
 const onDragStart = (event, type) => {
   event.dataTransfer.setData('application/node-type', type)
@@ -2408,18 +2523,9 @@ const upstreamVars = computed(() => {
   return vars
 })
 
-const { onConnect, onNodeClick, onPaneClick, onEdgeClick } = useVueFlow()
-const handleNodeClick = ({ node }) => {
-  selectedNode.value = node
-}
-const handlePaneClick = () => {
-  selectedNode.value = null
-}
+const { onConnect, onEdgeClick } = useVueFlow()
 onConnect((params) => {
   edges.value = [...edges.value, { id: `e_${params.source}_${params.target}`, source: params.source, target: params.target, sourceHandle: params.sourceHandle }]
-})
-onNodeClick(({ node }) => {
-  selectedNode.value = node
 })
 onEdgeClick(({ edge }) => {
   ElMessageBox.confirm('删除这条连线？', '确认', { type: 'warning' }).then(() => {
@@ -2427,9 +2533,13 @@ onEdgeClick(({ edge }) => {
     ElMessage.success('连线已删除')
   }).catch(() => {})
 })
-onPaneClick(() => {
+
+const handleNodeClick = ({ node }) => {
+  selectedNode.value = node
+}
+const handlePaneClick = () => {
   selectedNode.value = null
-})
+}
 
 const showImportDialog = () => {
   importMode.value = 'json'
@@ -2633,4 +2743,6 @@ onMounted(fetchWorkflows)
 .node-result-output { color: #606266; font-size: 11px; margin-top: 4px; word-break: break-all; max-height: 60px; overflow: hidden; }
 .template-card { padding: 10px 12px; border: 1px solid #e4e7ed; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
 .template-card:hover { border-color: #409eff; background: #ecf5ff; }
+.node-result-item.running { border-left-color: #409eff; background: #f0f7ff; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 </style>

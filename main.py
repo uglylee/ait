@@ -1847,6 +1847,68 @@ async def run_workflow(workflow_id: str, data: dict = {}):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+@app.post("/api/v1/workflows/{workflow_id}/run-stream")
+async def run_workflow_stream(workflow_id: str, data: dict = {}):
+    from workflow_engine import run_workflow as do_run, _cancelled_run_ids
+    import threading, json as _json, asyncio
+
+    q = asyncio.Queue()
+    run_id_holder = [None]
+
+    def on_progress(event):
+        if event.get("type") == "start":
+            run_id_holder[0] = event.get("node_id")
+        try:
+            loop.call_soon_threadsafe(q.put_nowait, event)
+        except Exception:
+            pass
+
+    loop = asyncio.get_event_loop()
+
+    def _run():
+        try:
+            llm = get_llm_router()
+            do_run(workflow_id, inputs=data.get("inputs", {}), llm_router=llm, progress_callback=on_progress)
+        except Exception as e:
+            try:
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "message": str(e)})
+            except Exception:
+                pass
+        finally:
+            try:
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "_end"})
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=1)
+                    if event.get("type") == "_end":
+                        yield f"data: {_json.dumps({'type': 'end'})}\n\n"
+                        break
+                    yield f"data: {_json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"data: {_json.dumps({'type': 'ping'})}\n\n"
+        finally:
+            if run_id_holder[0]:
+                from workflow_engine import cancel_workflow
+                cancel_workflow(run_id_holder[0])
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+@app.post("/api/v1/workflow-runs/{run_id}/cancel")
+async def cancel_run(run_id: str):
+    from workflow_engine import cancel_workflow
+    if cancel_workflow(run_id):
+        return {"status": "ok", "message": "已发送取消信号"}
+    raise HTTPException(status_code=404, detail="未找到运行中的工作流")
+
 @app.get("/api/v1/workflows/{workflow_id}/runs")
 async def get_workflow_runs(workflow_id: str):
     from workflow_engine import get_runs
@@ -2376,6 +2438,36 @@ async def download_media(filename: str):
         if os.path.exists(filepath):
             return FileResponse(filepath, filename=filename, media_type="application/octet-stream")
     raise HTTPException(status_code=404, detail="文件不存在")
+
+@app.post("/api/v1/tools/test-smtp")
+async def test_smtp(data: dict):
+    import smtplib
+    smtp_host = data.get("smtp_host", "")
+    smtp_port = int(data.get("smtp_port", 465))
+    smtp_user = data.get("smtp_user", "")
+    smtp_pass = data.get("smtp_pass", "")
+    use_ssl = data.get("use_ssl", True)
+    to_addr = data.get("to_addr", "")
+    if not smtp_host or not smtp_user or not smtp_pass:
+        raise HTTPException(status_code=400, detail="请填写完整的SMTP服务器、账号和授权码")
+    try:
+        if use_ssl:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+            server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.quit()
+        result = {"status": "success", "message": f"连接成功: {smtp_host}:{smtp_port}"}
+        if to_addr:
+            result["message"] += f"，可发送至 {to_addr}"
+        return result
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(status_code=400, detail="SMTP 认证失败，请检查账号和授权码")
+    except smtplib.SMTPConnectError:
+        raise HTTPException(status_code=400, detail=f"无法连接 SMTP 服务器 {smtp_host}:{smtp_port}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"连接失败: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
