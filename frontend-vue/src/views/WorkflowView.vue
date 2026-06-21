@@ -1126,6 +1126,10 @@
               <el-form-item label="HTML格式">
                 <el-switch v-model="selectedNode.data.config.is_html" />
               </el-form-item>
+              <el-form-item label="附件路径">
+                <el-input v-model="selectedNode.data.config.attachments" type="textarea" :rows="2" placeholder="文件路径，多个用逗号分隔&#10;支持: {{n3.path}}, {{n4.result.path}}" />
+                <div style="font-size:11px;color:#909399;margin-top:4px">引用上游节点生成的文件，如 {{节点ID.path}}</div>
+              </el-form-item>
             </template>
             <template v-if="selectedNode.type === 'excel_write'">
               <el-form-item label="文件路径">

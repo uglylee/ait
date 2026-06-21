@@ -1709,6 +1709,7 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
         subject = _replace_vars(config.get("subject", ""), context)
         body = _replace_vars(config.get("body", "{{input}}"), context)
         is_html = config.get("is_html", False)
+        attachments_raw = config.get("attachments", "")
         if not smtp_user or not smtp_pass:
             return {"error": "未配置 SMTP 账号或密码"}
         if not to_addr:
@@ -1716,11 +1717,42 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
         msg = MIMEMultipart()
         msg["From"] = smtp_user
         msg["To"] = to_addr
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "html" if is_html else "plain", "utf-8"))
+        attached_files = []
+        if attachments_raw:
+            paths_str = _replace_vars(attachments_raw, context)
+            file_paths = [p.strip() for p in paths_str.replace(";", ",").split(",") if p.strip()]
+            for fp in file_paths:
+                resolved = fp
+                if isinstance(resolved, str) and resolved.startswith(("{", "[")):
+                    try:
+                        items = json.loads(resolved)
+                        if isinstance(items, dict) and "path" in items:
+                            resolved = items["path"]
+                        elif isinstance(items, list):
+                            resolved = items[0].get("path", "") if items and isinstance(items[0], dict) else str(items[0]) if items else ""
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                if resolved and os.path.exists(resolved):
+                    try:
+                        part = MIMEBase("application", "octet-stream")
+                        with open(resolved, "rb") as f:
+                            part.set_payload(f.read())
+                        encoders.encode_base64(part)
+                        fname = os.path.basename(resolved)
+                        part.add_header("Content-Disposition", f'attachment; filename="{fname}"')
+                        msg.attach(part)
+                        attached_files.append(fname)
+                    except Exception as e:
+                        return {"error": f"附件添加失败 ({resolved}): {str(e)}"}
+                elif resolved:
+                    attached_files.append(f"[未找到: {resolved}]")
         try:
             if use_ssl:
                 server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
@@ -1730,7 +1762,7 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
             server.login(smtp_user, smtp_pass)
             server.sendmail(smtp_user, to_addr.split(","), msg.as_string())
             server.quit()
-            return {"result": "邮件已发送", "to": to_addr, "subject": subject}
+            return {"result": "邮件已发送", "to": to_addr, "subject": subject, "attachments": attached_files}
         except Exception as e:
             return {"error": f"发送邮件失败: {str(e)}"}
 
