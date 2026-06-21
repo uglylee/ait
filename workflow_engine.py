@@ -1589,17 +1589,38 @@ def _execute_node(node: dict, context: dict, llm_router=None) -> Any:
         try:
             from reportlab.lib.pagesizes import A4
             from reportlab.pdfgen import canvas
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
             if not save_path:
                 save_path = os.path.join("generated_media", f"doc_{int(__import__('time').time())}.pdf")
             os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+            _cn_font = None
+            _cn_font_paths = [
+                r"C:\Windows\Fonts\simhei.ttf",
+                r"C:\Windows\Fonts\msyh.ttc",
+                r"C:\Windows\Fonts\simsun.ttc",
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+                "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+                "/System/Library/Fonts/PingFang.ttc",
+            ]
+            for _fp in _cn_font_paths:
+                if os.path.exists(_fp):
+                    try:
+                        pdfmetrics.registerFont(TTFont("CNFont", _fp))
+                        _cn_font = "CNFont"
+                        break
+                    except Exception:
+                        continue
+            _title_font = _cn_font or "Helvetica-Bold"
+            _body_font = _cn_font or "Helvetica"
             c = canvas.Canvas(save_path, pagesize=A4)
             width, height = A4
             y = height - 50
             if title:
-                c.setFont("Helvetica-Bold", 16)
+                c.setFont(_title_font, 16)
                 c.drawString(50, y, title)
                 y -= 30
-            c.setFont("Helvetica", 11)
+            c.setFont(_body_font, 11)
             for line in input_val.split("\n"):
                 if y < 50:
                     c.showPage()
