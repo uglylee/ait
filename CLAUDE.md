@@ -14,7 +14,7 @@ AIT (AI Application Framework) - Full-stack AI application platform with FastAPI
 ## Key Files
 
 - `main.py` — FastAPI app, all API endpoints
-- `workflow_engine.py` — DAG workflow engine with 46 node types
+- `workflow_engine.py` — DAG workflow engine with 66 node types
 - `llm_providers.py` — Multi-provider LLM router with fallback
 - `langchain_engine.py` — RAG knowledge base engine
 - `ocr_engine.py` — OCR with EasyOCR + AI enhancement
@@ -56,3 +56,13 @@ Frontend VueFlow wraps as: `{id, type, position, data: {label, config}}`
 - Context flattening: node results auto-merged to top-level context
 - LLM streaming: skip `{"type": "reasoning"}` chunks, handle `[DONE]`
 - MongoDB: query by `id` field (UUID string), not `_id` (ObjectId)
+
+## Frontend API Calls
+
+- Axios instance with `baseURL: '/api/v1'` defined in `frontend-vue/src/api/index.js`
+- Local `apiPost` helper in components must prefix URLs with `/api/v1`
+
+## Known Gotchas
+
+- f-string prompts: escape braces as `{{` for literal `{` in LLM prompts
+- `chat_stream` with agnes provider: use `enable_thinking=False` to avoid token waste
