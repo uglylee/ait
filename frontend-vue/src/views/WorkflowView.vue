@@ -1,73 +1,129 @@
 <template>
   <div class="workflow-page">
     <!-- 工作流列表视图 -->
-    <div v-if="!editing">
-      <div class="page-card">
-        <div class="card-header">
-          <h3>AI 工作流</h3>
-          <div>
-            <el-button size="small" @click="showImportDialog">导入</el-button>
-            <el-button size="small" type="warning" @click="showTemplateDialog = true">模板库</el-button>
-            <el-button size="small" type="success" @click="showAiDialog = true">AI创建</el-button>
-            <el-button size="small" :type="batchMode ? 'danger' : ''" @click="toggleBatchMode">{{ batchMode ? '取消' : '批量操作' }}</el-button>
-            <el-button v-if="batchMode" size="small" type="danger" @click="batchDelete" :disabled="selectedWorkflows.length === 0">删除({{ selectedWorkflows.length }})</el-button>
-            <el-button v-if="batchMode" size="small" type="success" @click="batchExport" :disabled="selectedWorkflows.length === 0">导出({{ selectedWorkflows.length }})</el-button>
-            <el-button type="primary" size="small" @click="createNew">新建工作流</el-button>
-          </div>
+    <div v-if="!editing" class="max-w-6xl mx-auto px-6 py-8">
+      <!-- Header -->
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-xl font-bold text-gray-800">AI 工作流</h1>
+          <p class="text-sm text-gray-400 mt-1">可视化编排自动化流程</p>
         </div>
-        <div class="card-body">
-          <el-table :data="paginatedWorkflows" stripe v-loading="loadingList" @selection-change="(val) => selectedWorkflows = val">
-            <el-table-column v-if="batchMode" type="selection" width="40" />
-            <el-table-column prop="name" label="工作流名称" />
-            <el-table-column prop="description" label="描述" show-overflow-tooltip />
-            <el-table-column label="节点数" width="80" align="center">
-              <template #default="{ row }">{{ (row.nodes || []).length }}</template>
-            </el-table-column>
-            <el-table-column prop="status" label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
-                  {{ row.status === 'active' ? '启用' : '草稿' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="260" fixed="right">
-              <template #default="{ row }">
-                <div class="action-btns">
-                  <el-button class="btn-edit" size="small" @click="editWorkflow(row)">
-                    <span class="btn-icon">✏️</span> 编辑
-                  </el-button>
-                  <el-button class="btn-run" size="small" @click="runWorkflowDialog(row)">
-                    <span class="btn-icon">▶</span> 执行
-                  </el-button>
-                  <el-dropdown trigger="click" @command="(cmd) => handleMore(cmd, row)">
-                    <el-button class="btn-more" size="small">
-                      更多 <span style="margin-left:2px">▾</span>
-                    </el-button>
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item command="log"><span class="btn-icon">📋</span> 日志</el-dropdown-item>
-                        <el-dropdown-item command="version"><span class="btn-icon">🕐</span> 版本</el-dropdown-item>
-                        <el-dropdown-item command="export"><span class="btn-icon">📤</span> 导出</el-dropdown-item>
-                        <el-dropdown-item command="delete" divided><span class="btn-icon">🗑️</span> 删除</el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div v-if="workflows.length > pageSize" style="margin-top:12px;display:flex;justify-content:flex-end">
-            <el-pagination
-              v-model:current-page="currentPage"
-              v-model:page-size="pageSize"
-              :page-sizes="[10, 15, 20, 50]"
-              :total="workflows.length"
-              layout="total, sizes, prev, pager, next"
-              small
-            />
-          </div>
+        <div class="flex items-center gap-2">
+          <el-button size="small" @click="showImportDialog">导入</el-button>
+          <el-button size="small" @click="showTemplateDialog = true">模板库</el-button>
+          <el-button size="small" @click="showAiDialog = true">AI创建</el-button>
+          <el-button size="small" :type="batchMode ? 'danger' : ''" @click="toggleBatchMode">{{ batchMode ? '取消' : '批量' }}</el-button>
+          <el-button v-if="batchMode" size="small" type="danger" @click="batchDelete" :disabled="selectedWorkflows.length === 0">删除({{ selectedWorkflows.length }})</el-button>
+          <el-button v-if="batchMode" size="small" type="success" @click="batchExport" :disabled="selectedWorkflows.length === 0">导出({{ selectedWorkflows.length }})</el-button>
+          <el-button type="primary" size="small" @click="createNew">新建工作流</el-button>
         </div>
       </div>
+
+      <!-- Loading -->
+      <div v-if="loadingList" class="text-center py-16 text-gray-400">加载中...</div>
+
+      <!-- Empty (no workflows at all) -->
+      <div v-else-if="!workflows.length" class="text-center py-16">
+        <div class="text-5xl mb-3">⚡</div>
+        <p class="text-gray-400 mb-4">还没有工作流</p>
+        <el-button type="primary" @click="createNew">创建第一个</el-button>
+      </div>
+
+      <!-- Has workflows -->
+      <template v-else>
+        <!-- Search -->
+        <div class="mb-4">
+          <el-input
+            v-model="searchQuery"
+            placeholder="搜索工作流名称或描述..."
+            clearable
+            prefix-icon="Search"
+            class="max-w-md"
+          />
+        </div>
+
+        <!-- No match -->
+        <div v-if="!filteredWorkflows.length" class="text-center py-16">
+          <div class="text-4xl mb-3">🔍</div>
+          <p class="text-gray-400 mb-2">没有找到匹配的工作流</p>
+          <p class="text-xs text-gray-300">换个关键词试试</p>
+        </div>
+
+        <!-- Card Grid -->
+        <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div
+            v-for="wf in paginatedWorkflows"
+            :key="wf.id"
+            class="bg-white rounded-xl border border-gray-100 shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 group"
+          >
+            <!-- Card Header -->
+            <div class="p-5 pb-3">
+              <div class="flex items-start justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <input
+                    v-if="batchMode"
+                    type="checkbox"
+                    :value="wf"
+                    v-model="selectedWorkflows"
+                    class="accent-indigo-500"
+                  />
+                  <el-tag :type="wf.status === 'active' ? 'success' : 'info'" size="small">
+                    {{ wf.status === 'active' ? '启用' : '草稿' }}
+                  </el-tag>
+                </div>
+                <el-dropdown trigger="click" @command="(cmd) => handleMore(cmd, wf)">
+                  <button class="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors opacity-0 group-hover:opacity-100">
+                    <span class="text-sm">⋯</span>
+                  </button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="log">📋 日志</el-dropdown-item>
+                      <el-dropdown-item command="version">🕐 版本</el-dropdown-item>
+                      <el-dropdown-item command="export">📤 导出</el-dropdown-item>
+                      <el-dropdown-item command="delete" divided>🗑️ 删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
+              <h3 class="text-sm font-semibold text-gray-800 mb-1 line-clamp-1">{{ wf.name }}</h3>
+              <p class="text-xs text-gray-400 line-clamp-2 min-h-[32px]">{{ wf.description || '暂无描述' }}</p>
+            </div>
+
+            <!-- Card Meta -->
+            <div class="px-5 py-3 flex items-center justify-between text-xs text-gray-400 border-t border-gray-50">
+              <div class="flex items-center gap-1">
+                <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-indigo-50 text-indigo-500 text-xs">⚡</span>
+                {{ (wf.nodes || []).length }} 个节点
+              </div>
+              <span v-if="wf.updated_at" class="text-gray-300">{{ wf.updated_at.slice(0, 10) }}</span>
+            </div>
+
+            <!-- Card Actions -->
+            <div class="px-5 pb-4 flex gap-2">
+              <button
+                class="flex-1 py-2 rounded-lg text-xs font-medium bg-gray-50 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                @click="editWorkflow(wf)"
+              >✏️ 编辑</button>
+              <button
+                class="flex-1 py-2 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
+                @click="runWorkflowDialog(wf)"
+              >▶ 执行</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pagination -->
+        <div v-if="filteredWorkflows.length > pageSize" class="flex justify-end mt-4">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[9, 18, 36]"
+            :total="filteredWorkflows.length"
+            layout="total, sizes, prev, pager, next"
+            small
+          />
+        </div>
+      </template>
     </div>
 
     <!-- 工作流编辑器视图 -->
@@ -1616,7 +1672,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { VueFlow, useVueFlow, Handle, Position } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { MiniMap } from '@vue-flow/minimap'
@@ -1634,11 +1690,22 @@ const workflows = ref([])
 const selectedWorkflows = ref([])
 const batchMode = ref(false)
 const currentPage = ref(1)
-const pageSize = ref(15)
+const pageSize = ref(9)
+const searchQuery = ref('')
+const filteredWorkflows = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return workflows.value
+  return workflows.value.filter(wf => {
+    const name = (wf.name || '').toLowerCase()
+    const desc = (wf.description || '').toLowerCase()
+    return name.includes(q) || desc.includes(q)
+  })
+})
 const paginatedWorkflows = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return workflows.value.slice(start, start + pageSize.value)
+  return filteredWorkflows.value.slice(start, start + pageSize.value)
 })
+watch(searchQuery, () => { currentPage.value = 1 })
 const editing = ref(false)
 const wfVariables = ref([])
 const showVariablesDialog = ref(false)

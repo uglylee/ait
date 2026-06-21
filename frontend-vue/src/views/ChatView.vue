@@ -11,8 +11,8 @@
 
       <!-- 用户 -->
       <div class="sidebar-user">
-        <div class="user-avatar">🤖</div>
-        <span class="user-name">AI 助手</span>
+        <div class="user-avatar" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-weight: 700; font-size: 12px;">AIT</div>
+        <span class="user-name">{{ sidebarTitle }}</span>
       </div>
 
       <!-- 功能菜单 -->
@@ -27,11 +27,30 @@
         </div>
       </nav>
 
-      <!-- 智能体发现 -->
+      <!-- 我的智能体 -->
       <div class="sidebar-section">
-        <div class="section-header">
+        <div class="section-header" @click="showMyAgents = !showMyAgents" style="cursor: pointer;">
           <el-icon><Grid /></el-icon>
-          <span>发现智能体</span>
+          <span>我的智能体</span>
+          <svg :class="['w-3 h-3 ml-auto text-gray-400 transition-transform', showMyAgents ? 'rotate-180' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+        </div>
+        <div v-if="showMyAgents" class="agent-list">
+          <div v-if="!myAgents.length" class="agent-empty">
+            <span class="text-xs text-gray-400">暂无智能体</span>
+            <button class="text-[10px] text-indigo-500 hover:text-indigo-600 ml-1" @click="$router.push('/discover')">去创建</button>
+          </div>
+          <div
+            v-for="agent in myAgents"
+            :key="agent._id"
+            :class="['agent-item', activeAgentId === agent._id ? 'agent-active' : '']"
+            @click="startAgentChat(agent)"
+          >
+            <span class="agent-dot" :style="{ background: agent.bgColor }">{{ agent.icon }}</span>
+            <span class="agent-name">{{ agent.name }}</span>
+          </div>
+          <div v-if="myAgents.length" class="agent-more" @click="$router.push('/discover')">
+            <span class="text-xs text-gray-400 hover:text-indigo-500 transition-colors">查看全部 →</span>
+          </div>
         </div>
       </div>
 
@@ -45,22 +64,25 @@
             class="history-item"
             :class="{ active: currentConvId === conv._id }"
             @click="loadConversation(conv._id)"
+            @dblclick.stop="startRename(conv)"
           >
             <el-icon><ChatDotRound /></el-icon>
-            <span class="history-title">{{ conv.title }}</span>
+            <input
+              v-if="renamingId === conv._id"
+              v-model="renamingTitle"
+              class="rename-input"
+              @blur="confirmRename(conv)"
+              @keydown.enter="confirmRename(conv)"
+              @keydown.escape="cancelRename"
+              @click.stop
+              autofocus
+            />
+            <span v-else class="history-title">{{ conv.title }}</span>
             <el-icon class="history-delete" @click.stop="removeConversation(conv._id)">
               <Delete />
             </el-icon>
           </div>
           <div v-if="!conversations.length" class="history-empty">暂无历史对话</div>
-        </div>
-      </div>
-
-      <!-- 底部用户 -->
-      <div class="sidebar-footer">
-        <div class="footer-user">
-          <div class="footer-avatar">U</div>
-          <span>管理员</span>
         </div>
       </div>
     </aside>
@@ -92,32 +114,77 @@
           </el-dropdown>
         </div>
         <div class="header-right">
-          <el-button text size="small" @click="showSettings = true">
-            <el-icon><MoreFilled /></el-icon>
-          </el-button>
+          <button
+            :class="['toolbar-tag text-xs', systemPrompt ? 'active' : '']"
+            @click="showSystemPrompt = !showSystemPrompt"
+            :title="systemPrompt || '设置系统提示词'"
+          >
+            <span>⚙️</span>
+            <span class="hidden sm:inline">提示词</span>
+          </button>
+          <button
+            v-if="currentConvId"
+            class="toolbar-tag text-xs"
+            @click="clearContext"
+            title="清除当前对话的上下文消息"
+          >
+            <span>🧹</span>
+            <span class="hidden sm:inline">清除上下文</span>
+          </button>
         </div>
       </header>
+
+      <!-- 系统提示词面板 -->
+      <div v-if="showSystemPrompt" class="system-prompt-bar">
+        <div class="system-prompt-inner">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs font-semibold text-indigo-500">💡 系统提示词</span>
+            <span class="text-[10px] text-gray-400">设定 AI 的角色和行为规则</span>
+          </div>
+          <textarea
+            v-model="systemPrompt"
+            rows="3"
+            placeholder="例如：你是一个专业的Python编程助手，用简洁的中文回答问题，代码要包含注释..."
+            class="system-prompt-input"
+            @input="autoSaveSystemPrompt"
+          ></textarea>
+          <div class="flex items-center justify-between mt-2">
+            <span class="text-[10px] text-gray-300">{{ systemPrompt.length }} 字</span>
+          </div>
+        </div>
+      </div>
 
       <!-- 消息区域 -->
       <div class="chat-messages" ref="msgListRef">
         <!-- 空状态 -->
         <div v-if="messages.length === 0 && !loading" class="welcome-screen">
-          <div class="welcome-avatar">🤖</div>
-          <h2>你好，我是 AI 助手</h2>
+          <div
+            :style="{
+              background: welcomeIcon ? 'none' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: welcomeIcon ? '32px' : '20px',
+              width: '72px',
+              height: '72px',
+              borderRadius: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px',
+              boxShadow: welcomeIcon ? 'none' : '0 8px 24px rgba(99,102,241,0.3)',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center'
+            }"
+          >{{ welcomeIcon || 'AIT' }}</div>
+          <h2>你好，我是 {{ welcomeName }}</h2>
           <p>有什么我可以帮你的？</p>
-          <div class="welcome-chips">
-            <div class="chip" v-for="q in quickQuestions" :key="q" @click="askQuick(q)">
-              <span>{{ q }}</span>
-              <el-icon><ArrowRight /></el-icon>
-            </div>
-          </div>
         </div>
 
         <!-- 消息 -->
         <template v-for="(msg, i) in messages" :key="i">
           <div class="msg" :class="{ 'msg-user': msg.role === 'user' }">
-            <div v-if="msg.role === 'assistant'" class="msg-avatar">
-              <span>AI</span>
+            <div v-if="msg.role === 'assistant'" class="msg-avatar" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-weight: 700; font-size: 10px;">
+              <span>AIT</span>
             </div>
             <div class="msg-content">
               <div v-if="msg.reasoning" class="reasoning-block">
@@ -169,7 +236,7 @@
 
         <!-- 流式输出 -->
         <div v-if="streamingContent || streamingReasoning" class="msg">
-          <div class="msg-avatar"><span>AI</span></div>
+          <div class="msg-avatar" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-weight: 700; font-size: 10px;"><span>AIT</span></div>
           <div class="msg-content">
             <div v-if="streamingReasoning" class="reasoning-block">
               <div class="reasoning-header" @click="showReasoning = !showReasoning">
@@ -187,7 +254,7 @@
 
         <!-- 加载中 -->
         <div v-if="loading && !streamingContent" class="msg">
-          <div class="msg-avatar"><span>AI</span></div>
+          <div class="msg-avatar" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-weight: 700; font-size: 10px;"><span>AIT</span></div>
           <div class="msg-content">
             <div class="typing-indicator"><span></span><span></span><span></span></div>
           </div>
@@ -197,13 +264,6 @@
       <!-- 输入区域 -->
       <div class="chat-input-wrapper">
         <div class="chat-input">
-          <!-- 快捷功能栏 -->
-          <div class="quick-actions">
-            <div class="quick-action" v-for="action in quickActions" :key="action.label" @click="input = action.prompt">
-              <span class="qa-icon">{{ action.icon }}</span>
-              <span>{{ action.label }}</span>
-            </div>
-          </div>
           <!-- 图片预览 -->
           <div v-if="attachedImages.length" class="attached-images">
             <div v-for="(img, idx) in attachedImages" :key="idx" class="attached-img-item">
@@ -230,19 +290,15 @@
               <button class="toolbar-tag" :class="{ active: enableThinking }" @click="enableThinking = !enableThinking">
                 <span>💭</span> 深度思考
               </button>
+              <button class="toolbar-tag" :class="{ active: showSuggestions }" @click="showSuggestions = !showSuggestions">
+                <span>💡</span> 推荐问题
+              </button>
               <button class="toolbar-tag model-tag">
                 <span>🧠</span> {{ provider }}
               </button>
             </div>
             <div class="toolbar-right">
-              <el-switch v-model="webSearch" size="small" active-text="" inactive-text="" />
-              <button class="toolbar-icon-btn" @click="$refs.imageInput.click()">
-                <el-icon :size="18"><Picture /></el-icon>
-              </button>
-              <button class="toolbar-icon-btn" @click="$refs.imageInput.click()">
-                <el-icon :size="18"><Plus /></el-icon>
-              </button>
-            <button v-if="!loading" class="send-btn" :class="{ active: input.trim() || attachedImages.length }" @click="send" :disabled="!input.trim() && !attachedImages.length">
+              <button v-if="!loading" class="send-btn" :class="{ active: input.trim() || attachedImages.length }" @click="send" :disabled="!input.trim() && !attachedImages.length">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                 <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
               </svg>
@@ -267,7 +323,7 @@
         </div>
         <div class="panel-body">
           <div class="panel-avatar">
-            <div class="big-avatar">🤖</div>
+            <div class="big-avatar" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; font-weight: 700; font-size: 20px;">AIT</div>
             <h3>{{ provider }}</h3>
             <p>AI 智能助手</p>
           </div>
@@ -308,13 +364,14 @@
 
 <script setup>
 import { ref, nextTick, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Search, EditPen, Document, Grid, ChatDotRound, Delete, Plus,
   ArrowDown, ArrowRight, MoreFilled, CopyDocument, Top, Bottom,
   Close, User, Share, Picture
 } from '@element-plus/icons-vue'
-import { chatStream, agentChat, getProviders, getSettings, getConversations, getConversation, createConversation, deleteConversation } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { chatStream, agentChat, getProviders, getSettings, getConversations, getConversation, createConversation, updateConversation, deleteConversation, getAgents } from '../api'
 import { marked } from 'marked'
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -329,12 +386,38 @@ const renderContent = (text) => {
 }
 
 const route = useRoute()
+const router = useRouter()
+
+const showMyAgents = ref(false)
+const myAgents = ref([])
+
+const loadMyAgents = async () => {
+  try {
+    const { data } = await getAgents()
+    myAgents.value = data.agents || []
+  } catch (e) {}
+}
+
+const startAgentChat = (agent) => {
+  newChat()
+  systemPrompt.value = agent.systemPrompt || ''
+  sidebarTitle.value = agent.name
+  welcomeName.value = agent.name
+  welcomeIcon.value = agent.icon || ''
+  activeAgentId.value = agent._id
+}
+
+const sidebarTitle = ref('AI 助手')
+const welcomeName = ref('AI 助手')
+const welcomeIcon = ref('')
+const activeAgentId = ref(null)
 
 const messages = ref([])
 const input = ref('')
 const loading = ref(false)
 const streamingContent = ref('')
 const suggestions = ref([])
+const showSuggestions = ref(false)
 const provider = ref('')
 const providerList = ref([])
 const msgListRef = ref(null)
@@ -398,10 +481,23 @@ const lastAiIndex = computed(() => {
 })
 
 const systemPrompt = ref('')
+const showSystemPrompt = ref(false)
 const agentName = ref('')
+
+let saveTimer = null
+const autoSaveSystemPrompt = () => {
+  if (!currentConvId.value) return
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(async () => {
+    try {
+      await updateConversation(currentConvId.value, { system_prompt: systemPrompt.value })
+    } catch (e) {}
+  }, 800)
+}
 
 if (route.query.prompt) {
   systemPrompt.value = route.query.prompt
+  showSystemPrompt.value = true
 }
 if (route.query.agent) {
   agentName.value = route.query.agent
@@ -409,6 +505,7 @@ if (route.query.agent) {
 
 onMounted(async () => {
   refreshQuickActions()
+  loadMyAgents()
   try {
     const [providersRes, settingsRes] = await Promise.all([getProviders(), getSettings()])
     const registered = providersRes.data.providers?.map(p => p.name) || []
@@ -436,11 +533,13 @@ const loadConversations = async () => {
 
 const loadConversation = async (convId) => {
   currentConvId.value = convId
+  activeAgentId.value = null
   suggestions.value = []
   try {
     const { data } = await getConversation(convId)
     messages.value = data.messages || []
     if (data.provider) provider.value = data.provider
+    systemPrompt.value = data.system_prompt || ''
     await nextTick()
     scrollToBottom()
   } catch (e) {}
@@ -461,7 +560,7 @@ const send = async () => {
   // 新对话先创建 conversation
   if (!currentConvId.value) {
     try {
-      const { data } = await createConversation(userMsg.slice(0, 30), provider.value)
+      const { data } = await createConversation(userMsg.slice(0, 30), provider.value, systemPrompt.value)
       currentConvId.value = data.id
       await loadConversations()
     } catch (e) {}
@@ -483,7 +582,7 @@ const send = async () => {
     (chunk) => { if (aborted) return; streamingContent.value += chunk; scrollToBottom() },
     (error, sugs) => {
       currentAbortController = null
-      if (sugs && sugs.length) suggestions.value = sugs
+      if (sugs && sugs.length && showSuggestions.value) suggestions.value = sugs
       if (streamingContent.value) {
         messages.value.push({ role: 'assistant', content: streamingContent.value, reasoning: streamingReasoning.value || '' })
         streamingContent.value = ''
@@ -538,7 +637,7 @@ const send = async () => {
         scrollToBottom()
       }
     },
-    { web_search: webSearch.value, signal: abortCtrl.signal, enable_thinking: enableThinking.value }
+    { web_search: webSearch.value, signal: abortCtrl.signal, enable_thinking: enableThinking.value, suggest: showSuggestions.value }
   )
 }
 
@@ -551,6 +650,12 @@ const newChat = () => {
   taskProgress.value = null
   taskSteps.value = []
   currentThought.value = ''
+  systemPrompt.value = ''
+  showSystemPrompt.value = false
+  sidebarTitle.value = 'AI 助手'
+  welcomeName.value = 'AI 助手'
+  welcomeIcon.value = ''
+  activeAgentId.value = null
   refreshQuickActions()
   scrollToBottom()
 }
@@ -567,9 +672,42 @@ const removeConversation = async (id) => {
     if (currentConvId.value === id) {
       currentConvId.value = null
       messages.value = []
+      systemPrompt.value = ''
     }
   } catch (e) {}
 }
+
+const clearContext = async () => {
+  if (!currentConvId.value) return
+  try {
+    await ElMessageBox.confirm('确定清除当前对话的所有消息吗？系统提示词会保留。', '清除上下文', { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' })
+    await updateConversation(currentConvId.value, { clear_messages: true })
+    messages.value = []
+    streamingContent.value = ''
+    streamingReasoning.value = ''
+    suggestions.value = []
+    ElMessage.success('上下文已清除')
+  } catch (e) {}
+}
+
+const renamingId = ref(null)
+const renamingTitle = ref('')
+
+const startRename = (conv) => {
+  renamingId.value = conv._id
+  renamingTitle.value = conv.title
+}
+
+const confirmRename = async (conv) => {
+  if (!renamingTitle.value.trim()) { renamingId.value = null; return }
+  try {
+    await updateConversation(conv._id, { title: renamingTitle.value.trim() })
+    conv.title = renamingTitle.value.trim()
+  } catch (e) {}
+  renamingId.value = null
+}
+
+const cancelRename = () => { renamingId.value = null }
 
 const stopGeneration = () => {
   if (currentAbortController) {
@@ -620,6 +758,63 @@ const openImgPreview = (src) => {
 </script>
 
 <style scoped>
+/* 系统提示词面板 */
+.system-prompt-bar {
+  background: linear-gradient(135deg, #f8f7ff 0%, #f0f0ff 100%);
+  border-bottom: 1px solid #e8e6f0;
+  padding: 12px 20px;
+}
+.system-prompt-inner {
+  max-width: 680px;
+  margin: 0 auto;
+}
+.system-prompt-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #e2e0f0;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  font-family: inherit;
+  outline: none;
+  background: #fff;
+  color: #374151;
+  transition: all 0.2s;
+}
+.system-prompt-input:focus {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1);
+}
+.system-prompt-input::placeholder {
+  color: #c4c0d8;
+}
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid #818cf8;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #374151;
+  background: #fff;
+  outline: none;
+}
+.toolbar-tag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 18px;
+  border: 1px solid #e2e6eb;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.toolbar-tag:hover { border-color: #818cf8; color: #818cf8; }
+.toolbar-tag.active { background: #eef2ff; border-color: #818cf8; color: #6366f1; }
 .app-layout {
   display: flex;
   height: calc(100vh - 100px);
@@ -690,6 +885,35 @@ const openImgPreview = (src) => {
   color: #888;
   padding: 8px 0;
 }
+
+.agent-list { padding: 0 8px; }
+.agent-empty { padding: 4px 12px; display: flex; align-items: center; }
+.agent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.agent-item:hover { background: #f5f5f5; color: #333; }
+.agent-active { background: #eef2ff; color: #6366f1; }
+.agent-active:hover { background: #e0e7ff; }
+.agent-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.agent-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-more { padding: 4px 12px; text-align: center; cursor: pointer; }
 
 .sidebar-history { flex: 1; overflow-y: auto; padding: 0 8px; }
 .history-label { font-size: 12px; color: #bbb; padding: 8px 12px 4px; }
@@ -806,7 +1030,7 @@ const openImgPreview = (src) => {
   justify-content: center;
   flex-shrink: 0;
 }
-.msg-avatar span { font-size: 12px; font-weight: 600; color: #3b82f6; }
+.msg-avatar span { font-size: 12px; font-weight: 600; }
 .msg-avatar-user { background: #3b82f6; }
 .msg-avatar-user span { color: #fff; }
 

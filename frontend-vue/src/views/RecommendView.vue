@@ -1,8 +1,10 @@
 <template>
-  <div>
-    <div class="page-card">
-      <div class="card-header"><h3>智能推荐</h3></div>
-      <div class="card-body">
+  <div class="max-w-6xl mx-auto px-6 py-8">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
+      <div class="px-5 py-4 border-b border-gray-100">
+        <h3 class="text-base font-semibold text-gray-800">智能推荐</h3>
+      </div>
+      <div class="p-5">
         <el-form :inline="true" :model="form">
           <el-form-item label="用户 ID">
             <el-input v-model="form.userId" placeholder="输入用户ID" />
@@ -18,40 +20,42 @@
             <el-button type="primary" :loading="loading" @click="getRec">获取推荐</el-button>
           </el-form-item>
         </el-form>
-        <div v-if="!loading && searched && !list.length" style="margin-top:12px;color:#909399;font-size:13px">
+        <div v-if="!loading && searched && !list.length" class="mt-3 text-sm text-gray-400">
           暂无推荐内容，请先在 AI 对话中发送一些消息
         </div>
       </div>
     </div>
 
-    <el-row :gutter="16" v-if="list.length" style="margin-top:16px">
-      <el-col :span="8" v-for="(item, i) in list" :key="i">
-        <div class="rec-card">
-          <div class="rec-header">
-            <div class="rec-icon" :style="{ background: colors[i % 5] }">{{ icons[item.type] || '📌' }}</div>
-            <div class="rec-score" v-if="scores[i]">{{ (scores[i] * 100).toFixed(0) }}%</div>
-          </div>
-          <div class="rec-title">{{ item.title }}</div>
-          <div class="rec-type">类型：{{ item.type }}</div>
-          <el-button type="primary" text size="small" @click="showDetail(item)">查看详情 →</el-button>
+    <div v-if="list.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div
+        v-for="(item, i) in list"
+        :key="i"
+        class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
+      >
+        <div class="flex justify-between items-center mb-3">
+          <div class="w-11 h-11 rounded-xl flex items-center justify-center text-xl" :style="{ background: colors[i % 5] }">{{ icons[item.type] || '📌' }}</div>
+          <div v-if="scores[i]" class="text-2xl font-bold text-indigo-500">{{ (scores[i] * 100).toFixed(0) }}%</div>
         </div>
-      </el-col>
-    </el-row>
+        <div class="text-sm font-semibold text-gray-800 mb-1">{{ item.title }}</div>
+        <div class="text-xs text-gray-400 mb-2">类型：{{ item.type }}</div>
+        <el-button type="primary" text size="small" @click="showDetail(item)">查看详情 →</el-button>
+      </div>
+    </div>
 
     <el-dialog v-model="dialogVisible" title="推荐详情" width="600px">
       <div v-if="detailItem">
-        <h4 style="margin:0 0 12px">用户对话</h4>
-        <div style="background:#f5f7fa;padding:12px;border-radius:6px;line-height:1.8;color:#303133;white-space:pre-wrap">{{ detailItem.full_text }}</div>
+        <h4 class="text-sm font-semibold text-gray-800 mb-3">用户对话</h4>
+        <div class="bg-gray-50 p-3 rounded-lg text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ detailItem.full_text }}</div>
 
-        <div v-if="detailItem.related && detailItem.related.length" style="margin-top:16px">
-          <h4 style="margin:0 0 12px">相关知识库内容</h4>
-          <div v-for="(r, i) in detailItem.related" :key="i" style="background:#f0f9eb;padding:12px;border-radius:6px;margin-bottom:8px">
-            <div style="font-size:12px;color:#67c23a;margin-bottom:4px">相似度 {{ (1 - r.score) * 100 }}%</div>
-            <div style="color:#303133;line-height:1.6">{{ r.content }}</div>
+        <div v-if="detailItem.related && detailItem.related.length" class="mt-4">
+          <h4 class="text-sm font-semibold text-gray-800 mb-3">相关知识库内容</h4>
+          <div v-for="(r, i) in detailItem.related" :key="i" class="bg-green-50 p-3 rounded-lg mb-2">
+            <div class="text-xs text-green-600 mb-1">相似度 {{ (1 - r.score) * 100 }}%</div>
+            <div class="text-sm text-gray-700 leading-relaxed">{{ r.content }}</div>
           </div>
         </div>
 
-        <div v-if="!detailItem.related || !detailItem.related.length" style="margin-top:16px;color:#909399;font-size:13px">
+        <div v-if="!detailItem.related || !detailItem.related.length" class="mt-4 text-sm text-gray-400">
           暂无相关知识库内容
         </div>
       </div>
@@ -91,19 +95,3 @@ const getRec = async () => {
   }
 }
 </script>
-
-<style scoped>
-.rec-card {
-  background: #fff;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-  transition: all 0.2s;
-}
-.rec-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-.rec-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.rec-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
-.rec-score { font-size: 24px; font-weight: 700; color: #409eff; }
-.rec-title { font-size: 15px; font-weight: 600; color: #303133; margin-bottom: 4px; }
-.rec-type { font-size: 12px; color: #909399; margin-bottom: 8px; }
-</style>

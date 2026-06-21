@@ -1,73 +1,67 @@
 <template>
-  <div class="discover-page">
-    <!-- 顶部 -->
-    <div class="discover-header">
-      <div class="header-left">
-        <h1>{{ showMy ? '我创建的智能体' : '发现 AI 智能体' }}</h1>
-      </div>
-      <div class="header-right">
-        <el-button @click="showMy = !showMy">
-          {{ showMy ? '返回发现' : '我创建的' }}
-        </el-button>
-        <el-button type="primary" @click="showCreate = true">
-          <el-icon><Plus /></el-icon> 创建 AI 智能体
-        </el-button>
+  <div class="max-w-4xl mx-auto px-6 py-8">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-xl font-bold text-gray-800">{{ showMy ? '我创建的智能体' : '发现 AI 智能体' }}</h1>
+      <div class="flex gap-2">
+        <el-button @click="showMy = !showMy">{{ showMy ? '返回发现' : '我创建的' }}</el-button>
+        <el-button type="primary" @click="showCreate = true"><el-icon><Plus /></el-icon> 创建 AI 智能体</el-button>
       </div>
     </div>
 
-    <!-- 分类标签（只在发现页显示） -->
-    <div v-if="!showMy" class="category-tabs">
-      <div
-        v-for="cat in categories"
-        :key="cat.key"
-        class="tab-item"
-        :class="{ active: activeCategory === cat.key }"
+    <!-- Category Tabs -->
+    <div v-if="!showMy" class="flex gap-2 mb-6">
+      <div v-for="cat in categories" :key="cat.key"
+        :class="['px-5 py-2 rounded-full text-sm cursor-pointer transition-all',
+          activeCategory === cat.key ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200']"
         @click="activeCategory = cat.key"
-      >
-        {{ cat.label }}
-      </div>
+      >{{ cat.label }}</div>
     </div>
 
-    <!-- 我创建的列表 -->
+    <!-- My Agents -->
     <div v-if="showMy">
-      <div v-if="!myAgents.length" class="empty-state">
-        <div class="empty-icon">📝</div>
-        <p>还没有创建智能体</p>
+      <div v-if="!myAgents.length" class="text-center py-16 text-gray-400">
+        <div class="text-5xl mb-3">📝</div>
+        <p class="mb-4">还没有创建智能体</p>
         <el-button type="primary" @click="showCreate = true">创建第一个</el-button>
       </div>
-      <div v-else class="agent-grid">
-        <div v-for="agent in myAgents" :key="agent._id" class="agent-card my-agent" @click="startChat(agent)">
-          <div class="agent-icon" :style="{ background: agent.bgColor }">{{ agent.icon }}</div>
-          <div class="agent-info">
-            <div class="agent-name">{{ agent.name }}</div>
-            <div class="agent-desc">{{ agent.desc }}</div>
-            <div class="agent-meta">
-              <span class="agent-stats"><el-icon><ChatDotRound /></el-icon> 我创建的</span>
-            </div>
+      <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div v-for="agent in myAgents" :key="agent._id"
+          class="flex gap-3.5 p-4 bg-white border border-gray-100 rounded-xl cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 relative group"
+          @click="startChat(agent)"
+        >
+          <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0" :style="{ background: agent.bgColor }">{{ agent.icon }}</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold text-gray-800 mb-1">{{ agent.name }}</div>
+            <div class="text-xs text-gray-400 truncate mb-2">{{ agent.desc }}</div>
+            <div class="flex items-center gap-1 text-xs text-gray-300"><el-icon><ChatDotRound /></el-icon> 我创建的</div>
           </div>
-          <el-button class="delete-btn" type="danger" text size="small" @click.stop="removeAgent(agent._id)">
+          <el-button class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity" type="danger" text size="small" @click.stop="removeAgent(agent._id)">
             <el-icon><Delete /></el-icon>
           </el-button>
         </div>
       </div>
     </div>
 
-    <!-- 发现智能体列表 -->
-    <div v-else class="agent-grid">
-      <div v-for="agent in filteredAgents" :key="agent.id" class="agent-card" @click="startChat(agent)">
-        <div class="agent-icon" :style="{ background: agent.bgColor }">{{ agent.icon }}</div>
-        <div class="agent-info">
-          <div class="agent-name">{{ agent.name }}</div>
-          <div class="agent-desc">{{ agent.desc }}</div>
-          <div class="agent-meta">
-            <span class="agent-stats"><el-icon><ChatDotRound /></el-icon> {{ agent.chats }} 万人聊过</span>
-            <span class="agent-author">· @{{ agent.author }}</span>
+    <!-- Discovery -->
+    <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div v-for="agent in filteredAgents" :key="agent.id"
+        class="flex gap-3.5 p-4 bg-white border border-gray-100 rounded-xl cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5"
+        @click="startChat(agent)"
+      >
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0" :style="{ background: agent.bgColor }">{{ agent.icon }}</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-semibold text-gray-800 mb-1">{{ agent.name }}</div>
+          <div class="text-xs text-gray-400 truncate mb-2">{{ agent.desc }}</div>
+          <div class="flex items-center gap-1 text-xs text-gray-300">
+            <el-icon><ChatDotRound /></el-icon> {{ agent.chats }} 万人聊过
+            <span>· @{{ agent.author }}</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 创建智能体弹窗 -->
+    <!-- Create Dialog -->
     <el-dialog v-model="showCreate" title="创建 AI 智能体" width="500px">
       <el-form :model="createForm" label-position="top">
         <el-form-item label="智能体名称" required>
@@ -77,16 +71,12 @@
           <el-input v-model="createForm.desc" placeholder="一句话描述这个智能体的功能" />
         </el-form-item>
         <el-form-item label="图标">
-          <div class="icon-picker">
-            <div
-              v-for="icon in iconOptions"
-              :key="icon"
-              class="icon-option"
-              :class="{ active: createForm.icon === icon }"
+          <div class="flex flex-wrap gap-2">
+            <div v-for="icon in iconOptions" :key="icon"
+              :class="['w-10 h-10 rounded-lg flex items-center justify-center text-xl cursor-pointer border-2 transition-all',
+                createForm.icon === icon ? 'border-blue-500 bg-blue-50' : 'border-transparent hover:bg-gray-100']"
               @click="createForm.icon = icon"
-            >
-              {{ icon }}
-            </div>
+            >{{ icon }}</div>
           </div>
         </el-form-item>
         <el-form-item label="分类">
@@ -95,12 +85,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="角色设定（System Prompt）" required>
-          <el-input
-            v-model="createForm.systemPrompt"
-            type="textarea"
-            :rows="4"
-            placeholder="描述这个智能体的角色、能力和行为规则..."
-          />
+          <el-input v-model="createForm.systemPrompt" type="textarea" :rows="4" placeholder="描述这个智能体的角色、能力和行为规则..." />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -134,14 +119,7 @@ const categories = [
 
 const iconOptions = ['🤖', '✍️', '💡', '📊', '📝', '🎨', '🔬', '💻', '🌐', '🎯', '🚀', '⭐', '❤️', '🔥', '📚', '🎓']
 
-const createForm = ref({
-  name: '',
-  desc: '',
-  icon: '🤖',
-  bgColor: '#e8f0fe',
-  category: 'work',
-  systemPrompt: ''
-})
+const createForm = ref({ name: '', desc: '', icon: '🤖', bgColor: '#e8f0fe', category: 'work', systemPrompt: '' })
 
 const builtInAgents = [
   { id: 1, name: '全能写作助手', desc: '提供多种文案创作选择，轻松完成各种文案...', icon: '✍️', bgColor: '#fff3e0', chats: 1384.5, author: '官方', category: 'work', systemPrompt: '你是一个专业的写作助手，可以帮助用户撰写各种类型的文案。' },
@@ -206,38 +184,3 @@ const startChat = (agent) => {
   router.push({ path: '/chat', query: { agent: agent.name, prompt: agent.systemPrompt } })
 }
 </script>
-
-<style scoped>
-.discover-page { padding: 24px; max-width: 1000px; margin: 0 auto; }
-.discover-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-.header-left h1 { font-size: 24px; font-weight: 700; color: #1a1a1a; }
-.header-right { display: flex; gap: 8px; }
-
-.category-tabs { display: flex; gap: 8px; margin-bottom: 24px; }
-.tab-item { padding: 8px 20px; border-radius: 20px; font-size: 14px; color: #666; cursor: pointer; transition: all 0.2s; background: #f5f5f5; }
-.tab-item:hover { background: #e8e8e8; }
-.tab-item.active { background: #1a1a1a; color: #fff; }
-
-.agent-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-.agent-card { display: flex; gap: 14px; padding: 16px; background: #fff; border: 1px solid #f0f0f0; border-radius: 12px; cursor: pointer; transition: all 0.2s; position: relative; }
-.agent-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); transform: translateY(-2px); }
-.agent-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
-.agent-info { flex: 1; min-width: 0; }
-.agent-name { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
-.agent-desc { font-size: 13px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px; }
-.agent-meta { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #bbb; }
-.agent-stats { display: flex; align-items: center; gap: 3px; }
-.delete-btn { position: absolute; top: 8px; right: 8px; opacity: 0; transition: opacity 0.15s; }
-.agent-card:hover .delete-btn { opacity: 1; }
-
-.empty-state { text-align: center; padding: 60px 0; color: #999; }
-.empty-icon { font-size: 48px; margin-bottom: 12px; }
-.empty-state p { margin-bottom: 16px; }
-
-.icon-picker { display: flex; flex-wrap: wrap; gap: 8px; }
-.icon-option { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
-.icon-option:hover { background: #f5f5f5; }
-.icon-option.active { border-color: #3b82f6; background: #e8f0fe; }
-
-@media (max-width: 768px) { .agent-grid { grid-template-columns: 1fr; } .discover-header { flex-direction: column; gap: 12px; align-items: flex-start; } }
-</style>

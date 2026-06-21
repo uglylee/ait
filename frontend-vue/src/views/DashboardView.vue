@@ -1,99 +1,108 @@
 <template>
-  <div class="dashboard">
-    <el-row :gutter="16" class="stat-row">
-      <el-col :span="6" v-for="item in stats" :key="item.label">
-        <div class="stat-card">
-          <div class="stat-icon" :style="{ background: item.color }">{{ item.icon }}</div>
-          <div class="stat-info">
-            <div class="stat-value">{{ item.value }}</div>
-            <div class="stat-label">{{ item.label }}</div>
+  <div class="max-w-6xl mx-auto px-6 py-8">
+    <!-- Stats Row -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+      <div v-for="item in stats" :key="item.label" class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl" :style="{ background: item.color }">{{ item.icon }}</div>
+        <div>
+          <div class="text-2xl font-bold text-gray-800">{{ item.value }}</div>
+          <div class="text-xs text-gray-400 mt-0.5">{{ item.label }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <!-- Left Column -->
+      <div class="lg:col-span-3 flex flex-col gap-4">
+        <!-- Quick Tools -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div class="px-5 py-4 border-b border-gray-100">
+            <h3 class="text-base font-semibold text-gray-800">快捷入口</h3>
+          </div>
+          <div class="p-5">
+            <div class="grid grid-cols-3 gap-4">
+              <div v-for="tool in tools" :key="tool.name"
+                class="text-center p-4 rounded-xl cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                @click="$router.push(tool.path)"
+              >
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl mx-auto mb-2" :style="{ background: tool.bg }">{{ tool.icon }}</div>
+                <div class="text-sm font-medium text-gray-700">{{ tool.name }}</div>
+                <div class="text-xs text-gray-400 mt-0.5">{{ tool.desc }}</div>
+              </div>
+            </div>
           </div>
         </div>
-      </el-col>
-    </el-row>
 
-    <el-row :gutter="16">
-      <el-col :span="16">
-        <div class="page-card">
-          <div class="card-header"><h3>快捷入口</h3></div>
-          <div class="card-body">
-            <el-row :gutter="16">
-              <el-col :span="6" v-for="tool in tools" :key="tool.name">
-                <div class="tool-card" @click="$router.push(tool.path)">
-                  <div class="tool-icon" :style="{ background: tool.bg }">{{ tool.icon }}</div>
-                  <div class="tool-name">{{ tool.name }}</div>
-                  <div class="tool-desc">{{ tool.desc }}</div>
-                </div>
-              </el-col>
-            </el-row>
-          </div>
-        </div>
-
-        <div class="page-card" style="margin-top:16px">
-          <div class="card-header">
-            <h3>最近对话</h3>
+        <!-- Recent Chats -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <h3 class="text-base font-semibold text-gray-800">最近对话</h3>
             <el-button type="primary" text size="small" @click="$router.push('/chat')">查看更多</el-button>
           </div>
-          <div class="card-body">
+          <div class="p-5">
             <el-table :data="recentChats" stripe style="width:100%" v-loading="loading">
               <el-table-column prop="time" label="时间" width="160" />
               <el-table-column prop="model" label="模型" width="120" />
               <el-table-column prop="message" label="内容" show-overflow-tooltip />
             </el-table>
-            <div v-if="!loading && recentChats.length === 0" style="text-align:center;padding:20px;color:#909399">暂无对话记录</div>
+            <div v-if="!loading && recentChats.length === 0" class="text-center py-5 text-gray-400 text-sm">暂无对话记录</div>
           </div>
         </div>
-      </el-col>
+      </div>
 
-      <el-col :span="8">
-        <div class="page-card">
-          <div class="card-header"><h3>系统状态</h3></div>
-          <div class="card-body">
-            <div class="status-list">
-              <div class="status-item" v-for="s in systemStatus" :key="s.name">
-                <div class="status-left">
-                  <div class="status-dot" :style="{ background: s.ok ? '#67c23a' : '#f56c6c' }"></div>
-                  <span>{{ s.name }}</span>
-                </div>
-                <el-tag :type="s.ok ? 'success' : 'danger'" size="small">{{ s.ok ? '正常' : '异常' }}</el-tag>
+      <!-- Right Column -->
+      <div class="lg:col-span-2 flex flex-col gap-4">
+        <!-- System Status -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div class="px-5 py-4 border-b border-gray-100">
+            <h3 class="text-base font-semibold text-gray-800">系统状态</h3>
+          </div>
+          <div class="p-5 flex flex-col gap-3">
+            <div class="flex justify-between items-center" v-for="s in systemStatus" :key="s.name">
+              <div class="flex items-center gap-2 text-sm text-gray-700">
+                <div class="w-2 h-2 rounded-full" :style="{ background: s.ok ? '#67c23a' : '#f56c6c' }"></div>
+                <span>{{ s.name }}</span>
               </div>
+              <el-tag :type="s.ok ? 'success' : 'danger'" size="small">{{ s.ok ? '正常' : '异常' }}</el-tag>
             </div>
           </div>
         </div>
 
-        <div class="page-card" style="margin-top:16px">
-          <div class="card-header"><h3>可用模型</h3></div>
-          <div class="card-body">
-            <div class="model-list">
-              <div class="model-item" v-for="m in models" :key="m.name">
-                <div class="model-dot" :style="{ background: m.color }"></div>
-                <div class="model-info">
-                  <div class="model-name">{{ m.name }}</div>
-                  <div class="model-desc">{{ m.desc }}</div>
-                </div>
-                <el-tag size="small" :type="m.available ? 'success' : 'info'">{{ m.available ? '可用' : '未配置' }}</el-tag>
+        <!-- Models -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div class="px-5 py-4 border-b border-gray-100">
+            <h3 class="text-base font-semibold text-gray-800">可用模型</h3>
+          </div>
+          <div class="p-5 flex flex-col gap-3">
+            <div class="flex items-center gap-3" v-for="m in models" :key="m.name">
+              <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ background: m.color }"></div>
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-700">{{ m.name }}</div>
+                <div class="text-xs text-gray-400">{{ m.desc }}</div>
               </div>
+              <el-tag size="small" :type="m.available ? 'success' : 'info'">{{ m.available ? '可用' : '未配置' }}</el-tag>
             </div>
           </div>
         </div>
 
-        <div class="page-card" style="margin-top:16px">
-          <div class="card-header"><h3>今日使用量</h3></div>
-          <div class="card-body">
-            <div class="usage-bar">
-              <div class="usage-item" v-for="u in usage" :key="u.name">
-                <div class="usage-label">
-                  <span>{{ u.name }}</span>
-                  <span>{{ u.value }} 次</span>
-                </div>
-                <el-progress :percentage="u.pct" :stroke-width="8" />
+        <!-- Usage -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div class="px-5 py-4 border-b border-gray-100">
+            <h3 class="text-base font-semibold text-gray-800">今日使用量</h3>
+          </div>
+          <div class="p-5 flex flex-col gap-4">
+            <div v-for="u in usage" :key="u.name">
+              <div class="flex justify-between text-sm text-gray-600 mb-1">
+                <span>{{ u.name }}</span>
+                <span>{{ u.value }} 次</span>
               </div>
-              <div v-if="usage.length === 0" style="text-align:center;padding:12px;color:#909399;font-size:13px">今日暂无使用</div>
+              <el-progress :percentage="u.pct" :stroke-width="8" />
             </div>
+            <div v-if="usage.length === 0" class="text-center py-3 text-gray-400 text-xs">今日暂无使用</div>
           </div>
         </div>
-      </el-col>
-    </el-row>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -159,33 +168,3 @@ onMounted(async () => {
   }
 })
 </script>
-
-<style scoped>
-.stat-row { margin-bottom: 16px; }
-.stat-card {
-  background: #fff; border-radius: 8px; padding: 20px;
-  display: flex; align-items: center; gap: 16px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-}
-.stat-icon {
-  width: 48px; height: 48px; border-radius: 12px;
-  display: flex; align-items: center; justify-content: center; font-size: 24px;
-}
-.stat-value { font-size: 24px; font-weight: 700; color: #303133; }
-.stat-label { font-size: 13px; color: #909399; margin-top: 4px; }
-
-.status-list { display: flex; flex-direction: column; gap: 12px; }
-.status-item { display: flex; justify-content: space-between; align-items: center; }
-.status-left { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #303133; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; }
-
-.model-list { display: flex; flex-direction: column; gap: 12px; }
-.model-item { display: flex; align-items: center; gap: 10px; }
-.model-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.model-info { flex: 1; }
-.model-name { font-size: 14px; font-weight: 500; color: #303133; }
-.model-desc { font-size: 12px; color: #909399; }
-
-.usage-bar { display: flex; flex-direction: column; gap: 16px; }
-.usage-label { display: flex; justify-content: space-between; font-size: 13px; color: #606266; margin-bottom: 4px; }
-</style>

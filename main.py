@@ -134,6 +134,7 @@ class ChatStreamRequest(BaseModel):
     system_prompt: Optional[str] = None
     images: Optional[List[str]] = None
     enable_thinking: Optional[bool] = True
+    suggest: Optional[bool] = False
 
 class AgentCreate(BaseModel):
     name: str
@@ -151,6 +152,7 @@ class ChatResponse(BaseModel):
 class ConversationCreate(BaseModel):
     title: Optional[str] = "新对话"
     provider: Optional[str] = None
+    system_prompt: Optional[str] = ""
 
 class ContentRequest(BaseModel):
     topic: str
@@ -251,12 +253,13 @@ async def create_conversation(req: ConversationCreate):
         "_id": conv_id,
         "title": req.title,
         "provider": req.provider,
+        "system_prompt": req.system_prompt or "",
         "messages": [],
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat()
     }
     conversations_col.insert_one(doc)
-    return {"id": conv_id, "title": doc["title"], "provider": doc["provider"]}
+    return {"id": conv_id, "title": doc["title"], "provider": doc["provider"], "system_prompt": doc["system_prompt"]}
 
 @app.get("/api/v1/conversations/{conv_id}")
 async def get_conversation(conv_id: str):
@@ -265,6 +268,20 @@ async def get_conversation(conv_id: str):
         raise HTTPException(status_code=404, detail="对话不存在")
     conv["_id"] = str(conv["_id"])
     return conv
+
+@app.put("/api/v1/conversations/{conv_id}")
+async def update_conversation(conv_id: str, data: dict):
+    updates = {}
+    if "system_prompt" in data:
+        updates["system_prompt"] = data["system_prompt"]
+    if "title" in data:
+        updates["title"] = data["title"]
+    if "clear_messages" in data and data["clear_messages"]:
+        updates["messages"] = []
+    if updates:
+        updates["updated_at"] = datetime.now().isoformat()
+        conversations_col.update_one({"_id": conv_id}, {"$set": updates})
+    return {"status": "ok"}
 
 @app.delete("/api/v1/conversations/{conv_id}")
 async def delete_conversation(conv_id: str):
@@ -442,19 +459,33 @@ async def chat_stream(request: ChatStreamRequest):
                     collected[0] += chunk
                     yield f"data: {json.dumps({'content': chunk})}\n\n"
 
-            if collected[0] and len(collected[0]) > 5:
+            if collected[0] and len(collected[0]) > 5 and request.suggest:
                 try:
                     suggest_prompt = [
                         {"role": "system", "content": "你是一个助手。根据用户的问题和AI的回答，生成3个相关的后续问题，让用户可以继续深入了解。只输出问题，每行一个，不要编号，不要其他内容。"},
                         {"role": "user", "content": f"用户问题：{request.message}\nAI回答：{collected[0][:500]}"}
                     ]
-                    suggest_response = await router.chat(suggest_prompt, provider=request.provider, model=request.model)
-                    suggestions = [s.strip() for s in suggest_response.content.strip().split("\n") if s.strip() and len(s.strip()) > 3]
-                    suggestions = suggestions[:3]
-                    if suggestions:
-                        yield f"data: {json.dumps({'suggestions': suggestions})}\n\n"
-                except Exception:
-                    pass
+                    llm = router.get_provider(request.provider)
+                    import httpx as _httpx
+                    async with _httpx.AsyncClient(timeout=30.0) as _client:
+                        _resp = await _client.post(
+                            llm.chat_endpoint,
+                            headers={"Authorization": f"Bearer {llm.api_key}", "Content-Type": "application/json"},
+                            json={
+                                "model": request.model or llm.default_model,
+                                "messages": suggest_prompt,
+                                "temperature": 0.7,
+                                "enable_thinking": False,
+                            }
+                        )
+                        _data = _resp.json()
+                        _content = _data["choices"][0]["message"]["content"]
+                        suggestions = [s.strip() for s in _content.strip().split("\n") if s.strip() and len(s.strip()) > 3]
+                        suggestions = suggestions[:3]
+                        if suggestions:
+                            yield f"data: {json.dumps({'suggestions': suggestions})}\n\n"
+                except Exception as e:
+                    print(f"[SUGGEST ERROR] {e}")
 
         except Exception:
             pass

@@ -8,12 +8,13 @@ const api = axios.create({
 // 对话管理
 export const getConversations = () => api.get('/conversations')
 export const getConversation = (id) => api.get(`/conversations/${id}`)
-export const createConversation = (title, provider) => api.post('/conversations', { title, provider })
+export const createConversation = (title, provider, systemPrompt) => api.post('/conversations', { title, provider, system_prompt: systemPrompt || '' })
+export const updateConversation = (id, data) => api.put(`/conversations/${id}`, data)
 export const deleteConversation = (id) => api.delete(`/conversations/${id}`)
 
 // 流式对话（SSE via Fetch）
 export const chatStream = (conversationId, message, provider, systemPrompt, images, onChunk, onDone, onToolEvent, options = {}) => {
-  const body = { conversation_id: conversationId, message, provider, web_search: options.web_search === true }
+  const body = { conversation_id: conversationId, message, provider, web_search: options.web_search === true, suggest: options.suggest === true }
   if (options.enable_thinking !== undefined) body.enable_thinking = options.enable_thinking
   if (systemPrompt) body.system_prompt = systemPrompt
   if (images && images.length) body.images = images
@@ -54,7 +55,7 @@ export const chatStream = (conversationId, message, provider, systemPrompt, imag
         } catch (e) {}
       }
     }
-    if (!done) { onDone && onDone() }
+    onDone && onDone()
   }).catch(err => onDone && onDone(err.message))
 }
 

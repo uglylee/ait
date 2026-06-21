@@ -1,33 +1,46 @@
 <template>
-  <div>
-    <el-row :gutter="16">
-      <el-col :span="8">
-        <div class="page-card">
-          <div class="card-header">
-            <h3>知识库</h3>
-            <el-tag type="info" size="small">ChromaDB</el-tag>
+  <div class="max-w-6xl mx-auto px-6 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <!-- Left: KB Management -->
+      <div class="lg:col-span-2">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <h3 class="text-base font-semibold text-gray-800">知识库</h3>
+            <span class="text-[10px] font-medium text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">ChromaDB</span>
           </div>
-          <div class="card-body">
-            <div v-if="loading" style="text-align:center;padding:40px 0">
-              <el-icon class="is-loading" :size="24"><Loading /></el-icon>
-              <p style="color:#909399;margin-top:8px">加载中...</p>
+          <div class="p-5">
+            <div v-if="loading" class="text-center py-10">
+              <div class="w-6 h-6 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+              <p class="text-gray-400 text-sm mt-2">加载中...</p>
             </div>
             <div v-else>
-              <div class="stat-row">
-                <span class="stat-label">文档片段</span>
-                <span class="stat-value">{{ stats.total_chunks || 0 }}</span>
+              <!-- Stats -->
+              <div class="flex justify-between items-center py-2.5 border-b border-gray-50">
+                <span class="text-sm text-gray-500">文档片段</span>
+                <span class="text-lg font-bold text-gray-800">{{ stats.total_chunks || 0 }}</span>
               </div>
-              <div class="stat-row">
-                <span class="stat-label">状态</span>
-                <el-tag :type="statusOk ? 'success' : 'danger'" size="small">{{ statusOk ? '就绪' : '异常' }}</el-tag>
+              <div class="flex justify-between items-center py-2.5">
+                <span class="text-sm text-gray-500">状态</span>
+                <span :class="['text-xs font-medium px-2 py-0.5 rounded-full', statusOk ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500']">
+                  {{ statusOk ? '就绪' : '异常' }}
+                </span>
               </div>
-              <el-button type="danger" size="small" style="width:100%;margin-top:8px" :loading="clearing" @click="clearKB" :disabled="!stats.total_chunks">
-                清空知识库
-              </el-button>
 
-              <el-divider />
+              <!-- Clear Button -->
+              <button
+                :disabled="!stats.total_chunks || clearing"
+                :class="['w-full mt-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
+                  (!stats.total_chunks || clearing) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-red-50 text-red-500 hover:bg-red-100 hover:shadow-sm active:scale-[0.98]']"
+                @click="clearKB"
+              >
+                <span v-if="clearing" class="inline-block w-3.5 h-3.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin mr-1.5 align-middle"></span>
+                {{ clearing ? '清空中...' : '🗑️ 清空知识库' }}
+              </button>
 
-              <h4 style="margin:0 0 12px">添加文档</h4>
+              <div class="my-4 border-t border-gray-100"></div>
+
+              <!-- Upload -->
+              <h4 class="text-sm font-semibold text-gray-700 mb-3">📄 添加文档</h4>
               <el-upload
                 ref="uploadRef"
                 drag
@@ -37,78 +50,121 @@
                 :before-upload="() => false"
                 accept=".txt,.pdf,.csv,.md,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.html,.htm,.json,.xml,.log"
               >
-                <el-icon :size="40" style="color:#909399"><UploadFilled /></el-icon>
-                <div style="margin-top:8px;color:#606266">拖拽文件到此处，或<em>点击上传</em></div>
-                <div style="font-size:12px;color:#909399;margin-top:4px">支持批量上传：PDF Word Excel PPT TXT CSV HTML Markdown JSON XML</div>
+                <div class="py-4">
+                  <div class="text-4xl mb-2">☁️</div>
+                  <div class="text-sm text-gray-500">拖拽文件到此处，或 <span class="text-indigo-500 font-medium">点击上传</span></div>
+                  <div class="text-[11px] text-gray-300 mt-1.5">PDF Word Excel PPT TXT CSV HTML Markdown JSON XML</div>
+                </div>
               </el-upload>
-              <div v-if="pendingFiles.length" style="margin-top:8px;font-size:12px;color:#606266">
+              <div v-if="pendingFiles.length" class="mt-2 flex items-center gap-1.5 text-xs text-indigo-500">
+                <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
                 已选择 {{ pendingFiles.length }} 个文件
               </div>
-              <el-button type="primary" style="width:100%;margin-top:12px" :loading="uploading" @click="uploadFile" :disabled="!pendingFiles.length">
-                {{ uploading ? uploadProgress : '上传到知识库' }}
-              </el-button>
+              <button
+                :disabled="!pendingFiles.length || uploading"
+                :class="['w-full mt-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
+                  (!pendingFiles.length || uploading) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-indigo-500 text-white hover:bg-indigo-600 shadow-md shadow-indigo-200 hover:shadow-lg hover:shadow-indigo-300 hover:-translate-y-0.5 active:scale-[0.98]']"
+                @click="uploadFile"
+              >
+                <span v-if="uploading" class="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin mr-1.5 align-middle"></span>
+                {{ uploading ? uploadProgress : '⬆️ 上传到知识库' }}
+              </button>
 
-              <el-divider />
+              <div class="my-4 border-t border-gray-100"></div>
 
-              <h4 style="margin:0 0 12px">添加文本</h4>
+              <!-- Text Input -->
+              <h4 class="text-sm font-semibold text-gray-700 mb-3">📝 添加文本</h4>
               <el-input v-model="addText" type="textarea" :rows="3" placeholder="输入文本内容..." />
-              <el-button type="primary" style="width:100%;margin-top:8px" :loading="adding" @click="addTextToKB" :disabled="!addText.trim()">
-                添加到知识库
-              </el-button>
+              <button
+                :disabled="!addText.trim() || adding"
+                :class="['w-full mt-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
+                  (!addText.trim() || adding) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-violet-500 text-white hover:bg-violet-600 shadow-md shadow-violet-200 hover:shadow-lg hover:shadow-violet-300 hover:-translate-y-0.5 active:scale-[0.98]']"
+                @click="addTextToKB"
+              >
+                <span v-if="adding" class="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin mr-1.5 align-middle"></span>
+                {{ adding ? '添加中...' : '✨ 添加到知识库' }}
+              </button>
             </div>
           </div>
         </div>
-      </el-col>
-      <el-col :span="16">
-        <div class="page-card" style="height:100%">
-          <div class="card-header">
-            <h3>知识检索</h3>
+      </div>
+
+      <!-- Right: Search -->
+      <div class="lg:col-span-3">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 h-full flex flex-col">
+          <div class="px-5 py-4 border-b border-gray-100">
+            <h3 class="text-base font-semibold text-gray-800">🔍 知识检索</h3>
           </div>
-          <div class="card-body" style="display:flex;flex-direction:column">
-            <el-input v-model="query" placeholder="输入问题检索知识库..." @keydown.enter="search" style="margin-bottom:16px">
-              <template #append>
-                <el-button :loading="searching" @click="search">检索</el-button>
-              </template>
-            </el-input>
-            <div style="margin-bottom:12px">
-              <el-switch v-model="useAI" active-text="AI 回答" inactive-text="仅检索" />
+          <div class="p-5 flex flex-col flex-1">
+            <!-- Search Input -->
+            <div class="flex gap-2 mb-4">
+              <el-input v-model="query" placeholder="输入问题检索知识库..." @keydown.enter="search" class="flex-1" />
+              <button
+                :disabled="!query.trim() || searching"
+                :class="['px-5 py-2 rounded-xl text-sm font-medium transition-all duration-200 flex items-center gap-1.5 flex-shrink-0',
+                  (!query.trim() || searching) ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-indigo-500 text-white hover:bg-indigo-600 shadow-md shadow-indigo-200 hover:shadow-lg active:scale-[0.98]']"
+                @click="search"
+              >
+                <span v-if="searching" class="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span v-else>🔎</span>
+                {{ searching ? '检索中...' : '检索' }}
+              </button>
             </div>
-            <div v-if="searchError" style="margin-bottom:12px">
-              <el-alert :title="searchError" type="error" show-icon :closable="false" />
+
+            <!-- AI Toggle -->
+            <div class="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-xl">
+              <el-switch v-model="useAI" />
+              <span class="text-xs font-medium" :class="useAI ? 'text-indigo-500' : 'text-gray-400'">AI 回答</span>
+              <span v-if="useAI" class="ml-auto text-[10px] text-indigo-400 bg-indigo-50 px-2 py-0.5 rounded-full">会调用 LLM</span>
             </div>
-            <div v-if="ragAnswer" class="rag-answer">
-              <div class="answer-label">AI 回答</div>
-              <div>{{ ragAnswer }}</div>
+
+            <!-- Error -->
+            <div v-if="searchError" class="mb-3 p-3 bg-red-50 rounded-xl text-sm text-red-500 flex items-center gap-2">
+              <span>⚠️</span> {{ searchError }}
             </div>
-            <div style="flex:1;overflow-y:auto">
-              <div v-if="!results.length && !searching && !ragAnswer" class="empty-state">
-                <p style="color:#909399">输入问题后按 Enter 检索</p>
+
+            <!-- AI Answer -->
+            <div v-if="ragAnswer" class="p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl mb-4 border border-green-100">
+              <div class="text-xs text-green-600 font-semibold mb-2 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                AI 回答
               </div>
-              <div v-for="(r, i) in results" :key="i" class="search-result">
-                <div class="result-score">{{ (r.score * 100).toFixed(0) }}%</div>
-                <div class="result-content">
-                  <div class="result-source">
-                    片段 {{ i + 1 }}
-                    <span v-if="r.file_name" style="margin-left:8px">
-                      <el-tag size="small" type="info">{{ r.file_name }}</el-tag>
-                      <a v-if="r.file_name" :href="ragDownloadFile(r.file_id)" target="_blank" style="margin-left:4px;font-size:12px;color:#409eff;text-decoration:none">下载</a>
+              <div class="text-sm text-gray-700 leading-relaxed">{{ ragAnswer }}</div>
+            </div>
+
+            <!-- Results -->
+            <div class="flex-1 overflow-y-auto">
+              <div v-if="!results.length && !searching && !ragAnswer" class="h-[200px] flex flex-col items-center justify-center text-gray-300">
+                <div class="text-4xl mb-3">📚</div>
+                <p class="text-sm">输入问题后按 Enter 检索</p>
+              </div>
+              <div v-for="(r, i) in results" :key="i" class="flex gap-3 p-3.5 rounded-xl bg-gray-50 mb-2 hover:bg-gray-100 transition-colors">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 shadow-sm">
+                  {{ (r.score * 100).toFixed(0) }}%
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs text-gray-400 mb-1.5 flex items-center gap-1.5">
+                    <span>片段 {{ i + 1 }}</span>
+                    <span v-if="r.file_name" class="inline-flex items-center gap-1">
+                      <span class="w-1 h-1 rounded-full bg-gray-300"></span>
+                      <span class="bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded text-[10px] font-medium">{{ r.file_name }}</span>
+                      <a :href="ragDownloadFile(r.file_id)" target="_blank" class="text-indigo-400 hover:text-indigo-600 underline ml-0.5">下载</a>
                     </span>
                   </div>
-                  <div class="result-text">{{ r.content }}</div>
+                  <div class="text-sm text-gray-600 leading-relaxed">{{ r.content }}</div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </el-col>
-    </el-row>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Loading, UploadFilled } from '@element-plus/icons-vue'
 import { ragStatus, ragAddText, ragAddFiles, ragQuery, ragClear, ragDownloadFile } from '../api'
 
 const loading = ref(true)
@@ -223,51 +279,3 @@ const search = async () => {
 
 onMounted(fetchStatus)
 </script>
-
-<style scoped>
-.stat-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-}
-.stat-label { color: #606266; font-size: 14px; }
-.stat-value { color: #303133; font-size: 18px; font-weight: 600; }
-.rag-answer {
-  padding: 16px;
-  background: #f0f9eb;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  line-height: 1.6;
-}
-.answer-label {
-  font-size: 12px;
-  color: #67c23a;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.empty-state { height: 200px; display: flex; align-items: center; justify-content: center; }
-.search-result {
-  display: flex;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 6px;
-  margin-bottom: 8px;
-  background: #f8f9fa;
-}
-.result-score {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: #409eff;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.result-source { font-size: 12px; color: #909399; margin-bottom: 4px; }
-.result-text { font-size: 14px; color: #303133; line-height: 1.6; }
-</style>

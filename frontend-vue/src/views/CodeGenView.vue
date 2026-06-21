@@ -1,76 +1,84 @@
 <template>
-  <div class="codegen-page">
-    <div class="page-header">
-      <h1>AI 代码生成</h1>
-      <p>输入需求描述，自动生成项目代码</p>
+  <div class="max-w-3xl mx-auto px-6 py-8">
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-gray-800">AI 代码生成</h1>
+      <p class="text-sm text-gray-400 mt-1">输入需求描述，自动生成项目代码</p>
     </div>
 
-    <div class="form-card">
-      <div class="form-group">
-        <label>项目描述</label>
-        <textarea v-model="form.description" rows="3" placeholder="描述你想要的项目，例如：&#10;- 写一个贪吃蛇游戏&#10;- 做一个待办事项网站&#10;- 创建一个Python爬虫"></textarea>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-4">
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">项目描述</label>
+        <textarea v-model="form.description" rows="3"
+          class="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none resize-y"
+          placeholder="描述你想要的项目，例如：&#10;- 写一个贪吃蛇游戏&#10;- 做一个待办事项网站&#10;- 创建一个Python爬虫"
+        ></textarea>
       </div>
-      <div class="form-group">
-        <label>技术栈</label>
-        <div class="lang-btns">
-          <button v-for="l in langs" :key="l.value" :class="{ active: form.lang === l.value }" @click="form.lang = l.value">
-            {{ l.label }}
-          </button>
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">技术栈</label>
+        <div class="flex gap-2">
+          <button v-for="l in langs" :key="l.value"
+            :class="['px-5 py-2 rounded-full text-sm border transition-all',
+              form.lang === l.value ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-white text-gray-500 border-gray-200 hover:border-indigo-300']"
+            @click="form.lang = l.value"
+          >{{ l.label }}</button>
         </div>
       </div>
-      <button class="btn-primary" :disabled="generating || !form.description.trim()" @click="generate">
-        {{ generating ? '生成中...' : '生成项目' }}
-      </button>
+      <button
+        :disabled="generating || !form.description.trim()"
+        :class="['w-full py-3 rounded-lg text-sm font-medium transition-colors',
+          generating || !form.description.trim() ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-indigo-500 text-white hover:bg-indigo-600']"
+        @click="generate"
+      >{{ generating ? '生成中...' : '生成项目' }}</button>
     </div>
 
-    <div v-if="logs.length" class="process-card">
-      <div class="card-title">
+    <div v-if="logs.length" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-4">
+      <div class="flex justify-between items-center mb-3 text-sm font-semibold text-gray-700">
         <span>生成过程</span>
-        <span v-if="done" class="tag-done">完成</span>
-        <span v-else-if="failed" class="tag-fail">失败</span>
-        <span v-else class="tag-run">运行中</span>
+        <span v-if="done" class="px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-600 font-normal">完成</span>
+        <span v-else-if="failed" class="px-2 py-0.5 rounded-full text-xs bg-red-50 text-red-500 font-normal">失败</span>
+        <span v-else class="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-500 font-normal">运行中</span>
       </div>
-      <div class="log-list" ref="logList">
-        <div v-for="(log, i) in logs" :key="i" class="log-item" :class="log.type">
-          <span class="log-dot" :class="log.type"></span>
+      <div class="max-h-[180px] overflow-y-auto bg-gray-50 rounded-lg p-3" ref="logList">
+        <div v-for="(log, i) in logs" :key="i" :class="['flex items-center gap-2 py-1 text-xs', log.type === 'error' ? 'text-red-500' : log.type === 'done' ? 'text-green-600' : 'text-gray-600']">
+          <span :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', log.type === 'status' ? 'bg-blue-400' : log.type === 'error' ? 'bg-red-400' : log.type === 'done' ? 'bg-green-400' : 'bg-gray-300']"></span>
           {{ log.text }}
         </div>
       </div>
     </div>
 
-    <div v-if="code" class="code-card">
-      <div class="card-title">
+    <div v-if="code" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-4">
+      <div class="flex justify-between items-center mb-3 text-sm font-semibold text-gray-700">
         <span>生成代码</span>
-        <div class="btn-group">
-          <button class="btn-sm" @click="copyCode">复制代码</button>
-          <button class="btn-sm btn-run" @click="runCode" :disabled="running">{{ running ? '运行中...' : '运行项目' }}</button>
+        <div class="flex gap-1.5">
+          <button class="px-3 py-1.5 border border-gray-200 rounded-md text-xs text-gray-500 hover:border-indigo-400 hover:text-indigo-500 transition-colors" @click="copyCode">复制代码</button>
+          <button class="px-3 py-1.5 rounded-md text-xs text-white bg-indigo-500 hover:bg-indigo-600 transition-colors" @click="runCode" :disabled="running">{{ running ? '运行中...' : '运行项目' }}</button>
         </div>
       </div>
-      <pre class="code-block"><code>{{ code }}</code></pre>
+      <pre class="bg-gray-900 text-gray-300 p-4 rounded-lg text-xs leading-relaxed overflow-auto max-h-[400px] whitespace-pre-wrap break-all font-mono"><code>{{ code }}</code></pre>
     </div>
 
-    <div v-if="output" class="output-card">
-      <div class="card-title"><span>运行输出</span></div>
-      <pre class="output-block">{{ output }}</pre>
+    <div v-if="output" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-4">
+      <div class="text-sm font-semibold text-gray-700 mb-3">运行输出</div>
+      <pre class="bg-gray-900 text-green-400 p-4 rounded-lg text-xs leading-relaxed overflow-auto max-h-[300px] whitespace-pre-wrap font-mono">{{ output }}</pre>
     </div>
 
-    <div v-if="htmlPath" class="preview-card">
-      <div class="card-title">
+    <div v-if="htmlPath" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-4">
+      <div class="flex justify-between items-center mb-3 text-sm font-semibold text-gray-700">
         <span>页面预览</span>
-        <button class="btn-sm" @click="openBrowser">新窗口打开</button>
+        <button class="px-3 py-1.5 border border-gray-200 rounded-md text-xs text-gray-500 hover:border-indigo-400 hover:text-indigo-500 transition-colors" @click="openBrowser">新窗口打开</button>
       </div>
-      <div class="preview-box">
-        <iframe :src="'file:///' + htmlPath.replace(/\\\\/g, '/')" sandbox="allow-scripts"></iframe>
+      <div class="rounded-lg overflow-hidden border border-gray-100">
+        <iframe :src="'file:///' + htmlPath.replace(/\\\\/g, '/')" sandbox="allow-scripts" class="w-full h-[400px] border-none"></iframe>
       </div>
     </div>
 
-    <div v-if="!logs.length" class="tpl-card">
-      <div class="card-title"><span>快捷模板</span></div>
-      <div class="tpl-grid">
-        <div class="tpl-item" v-for="t in templates" :key="t.name" @click="useTpl(t)">
-          <div class="tpl-icon">{{ t.icon }}</div>
-          <div class="tpl-name">{{ t.name }}</div>
-          <div class="tpl-sub">{{ t.desc }}</div>
+    <div v-if="!logs.length" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+      <div class="text-sm font-semibold text-gray-700 mb-3">快捷模板</div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div class="text-center p-4 border border-gray-100 rounded-xl cursor-pointer transition-all hover:border-indigo-300 hover:shadow-sm" v-for="t in templates" :key="t.name" @click="useTpl(t)">
+          <div class="text-2xl mb-1.5">{{ t.icon }}</div>
+          <div class="text-sm font-semibold text-gray-700">{{ t.name }}</div>
+          <div class="text-xs text-gray-400 mt-0.5">{{ t.desc }}</div>
         </div>
       </div>
     </div>
@@ -199,88 +207,3 @@ const openBrowser = () => { if (htmlPath.value) window.open('file:///' + htmlPat
 
 const useTpl = (t) => { form.value.description = t.full; form.value.lang = t.lang }
 </script>
-
-<style scoped>
-.codegen-page { max-width: 880px; margin: 0 auto; padding: 24px; }
-.page-header { margin-bottom: 24px; }
-.page-header h1 { font-size: 26px; color: #1a1a1a; margin-bottom: 6px; }
-.page-header p { color: #999; font-size: 14px; }
-
-.form-card, .process-card, .code-card, .output-card, .preview-card, .tpl-card {
-  background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px;
-  box-shadow: 0 1px 6px rgba(0,0,0,0.06);
-}
-
-.form-group { margin-bottom: 16px; }
-.form-group label { display: block; font-size: 14px; font-weight: 500; color: #333; margin-bottom: 8px; }
-.form-group textarea {
-  width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;
-  font-size: 14px; resize: vertical; font-family: inherit; outline: none;
-}
-.form-group textarea:focus { border-color: #409eff; }
-
-.lang-btns { display: flex; gap: 8px; }
-.lang-btns button {
-  padding: 8px 20px; border: 1px solid #ddd; border-radius: 20px;
-  font-size: 13px; cursor: pointer; background: #fff; color: #666; transition: all 0.2s;
-}
-.lang-btns button.active { background: #409eff; color: #fff; border-color: #409eff; }
-
-.btn-primary {
-  width: 100%; padding: 12px; background: #409eff; color: #fff; border: none;
-  border-radius: 8px; font-size: 15px; cursor: pointer; transition: background 0.2s;
-}
-.btn-primary:hover { background: #337ecc; }
-.btn-primary:disabled { background: #ccc; cursor: not-allowed; }
-
-.card-title {
-  display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
-  font-size: 14px; font-weight: 600; color: #333;
-}
-.tag-done { background: #e8f5e9; color: #4caf50; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 400; }
-.tag-fail { background: #fce4ec; color: #f44336; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 400; }
-.tag-run { background: #e3f2fd; color: #2196f3; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 400; }
-
-.log-list { max-height: 180px; overflow-y: auto; background: #f8f9fa; border-radius: 8px; padding: 12px; }
-.log-item { padding: 4px 0; font-size: 13px; color: #555; display: flex; align-items: center; gap: 8px; }
-.log-item.error { color: #f44336; }
-.log-item.done { color: #4caf50; }
-.log-dot { width: 6px; height: 6px; border-radius: 50%; background: #bbb; flex-shrink: 0; }
-.log-dot.status { background: #2196f3; }
-.log-dot.error { background: #f44336; }
-.log-dot.done { background: #4caf50; }
-
-.btn-group { display: flex; gap: 6px; }
-.btn-sm {
-  padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px;
-  font-size: 12px; cursor: pointer; background: #fff; color: #666; transition: all 0.2s;
-}
-.btn-sm:hover { border-color: #409eff; color: #409eff; }
-.btn-run { background: #409eff; color: #fff; border-color: #409eff; }
-.btn-run:hover { background: #337ecc; }
-
-.code-block {
-  background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 8px;
-  font-size: 13px; line-height: 1.6; overflow: auto; max-height: 400px;
-  white-space: pre-wrap; word-break: break-all; font-family: Consolas, monospace;
-}
-.output-block {
-  background: #1a1a1a; color: #4ade80; padding: 16px; border-radius: 8px;
-  font-size: 13px; line-height: 1.6; overflow: auto; max-height: 300px;
-  white-space: pre-wrap; font-family: Consolas, monospace;
-}
-.preview-box { border-radius: 8px; overflow: hidden; border: 1px solid #eee; }
-.preview-box iframe { width: 100%; height: 400px; border: none; }
-
-.tpl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.tpl-item {
-  text-align: center; padding: 16px 8px; border: 1px solid #eee; border-radius: 10px;
-  cursor: pointer; transition: all 0.2s;
-}
-.tpl-item:hover { border-color: #409eff; box-shadow: 0 2px 8px rgba(64,158,255,0.15); }
-.tpl-icon { font-size: 28px; margin-bottom: 6px; }
-.tpl-name { font-size: 14px; font-weight: 600; color: #333; }
-.tpl-sub { font-size: 12px; color: #999; margin-top: 2px; }
-
-@media (max-width: 768px) { .tpl-grid { grid-template-columns: repeat(2, 1fr); } }
-</style>

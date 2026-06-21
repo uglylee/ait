@@ -1,203 +1,48 @@
 <template>
-  <el-container class="app-container">
-    <!-- 侧边栏 -->
-    <el-aside :width="isCollapse ? '64px' : '220px'" class="app-aside">
-      <div class="sidebar-logo">
-        <div class="logo-icon">AIT</div>
-        <span v-show="!isCollapse" class="logo-text">AIT</span>
+  <div class="min-h-screen bg-gray-50">
+    <!-- Header -->
+    <header class="h-14 bg-white/80 backdrop-blur-lg border-b border-gray-100/80 flex items-center justify-between px-5 sticky top-0 z-50">
+      <div class="flex items-center gap-2">
+        <!-- Logo -->
+        <div
+          class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-violet-500 to-purple-500 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-indigo-200 cursor-pointer hover:shadow-lg hover:shadow-indigo-300 transition-all duration-200 hover:scale-105"
+          @click="$router.push('/home')"
+        >AIT</div>
+
+        <!-- Breadcrumb -->
+        <template v-if="!isHome">
+          <div class="flex items-center gap-1.5 ml-1">
+            <svg class="w-3.5 h-3.5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            <span
+              class="text-xs text-gray-400 hover:text-indigo-500 cursor-pointer transition-colors px-1.5 py-0.5 rounded hover:bg-indigo-50"
+              @click="$router.push('/home')"
+            >首页</span>
+            <svg class="w-3 h-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            <span v-if="currentTitle" class="text-xs font-medium text-gray-600 px-1.5 py-0.5 bg-gray-50 rounded">{{ currentTitle }}</span>
+          </div>
+        </template>
+        <template v-else>
+          <span class="text-xs text-gray-300 ml-1 hidden sm:inline">AI 应用通用框架</span>
+        </template>
       </div>
-      <el-menu
-        :default-active="activeMenu"
-        :collapse="isCollapse"
-        background-color="#1d1e2c"
-        text-color="rgba(255,255,255,0.65)"
-        active-text-color="#fff"
-        :collapse-transition="false"
-        router
-      >
-        <el-menu-item index="/dashboard">
-          <el-icon><Odometer /></el-icon>
-          <span>工作台</span>
-        </el-menu-item>
-        <el-menu-item index="/chat">
-          <el-icon><ChatDotRound /></el-icon>
-          <span>AI 对话</span>
-        </el-menu-item>
-        <el-menu-item index="/codegen">
-          <el-icon><Monitor /></el-icon>
-          <span>代码生成</span>
-        </el-menu-item>
-        <el-menu-item index="/recommend">
-          <el-icon><TrendCharts /></el-icon>
-          <span>智能推荐</span>
-        </el-menu-item>
-        <el-menu-item index="/ocr">
-          <el-icon><PictureFilled /></el-icon>
-          <span>OCR 识别</span>
-        </el-menu-item>
-        <el-menu-item index="/media">
-          <el-icon><Film /></el-icon>
-          <span>AI 创作</span>
-        </el-menu-item>
-        <el-menu-item index="/knowledge">
-          <el-icon><Collection /></el-icon>
-          <span>知识库</span>
-        </el-menu-item>
-        <el-menu-item index="/discover">
-          <el-icon><Grid /></el-icon>
-          <span>发现智能体</span>
-        </el-menu-item>
-        <el-menu-item index="/workflow">
-          <el-icon><Connection /></el-icon>
-          <span>工作流</span>
-        </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Setting /></el-icon>
-          <span>系统设置</span>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
 
-    <el-container>
-      <!-- 顶栏 -->
-      <el-header class="app-header">
-        <div class="header-left">
-          <el-icon class="collapse-btn" @click="isCollapse = !isCollapse">
-            <Fold v-if="!isCollapse" />
-            <Expand v-else />
-          </el-icon>
-          <el-breadcrumb separator="/">
-            <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item v-if="currentRoute.meta?.title">{{ currentRoute.meta.title }}</el-breadcrumb-item>
-          </el-breadcrumb>
-        </div>
-        <div class="header-right">
-          <el-dropdown trigger="click">
-            <div class="user-info">
-              <el-avatar :size="32" style="background:#409eff">U</el-avatar>
-              <span class="user-name">管理员</span>
-              <el-icon><ArrowDown /></el-icon>
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item>个人设置</el-dropdown-item>
-                <el-dropdown-item divided>退出登录</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </el-header>
+      <div class="flex items-center gap-3">
+      </div>
+    </header>
 
-      <!-- 内容区 -->
-      <el-main class="app-main">
-        <router-view />
-      </el-main>
-    </el-container>
-  </el-container>
+    <!-- Content -->
+    <main class="min-h-[calc(100vh-56px)]">
+      <router-view />
+    </main>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
-const isCollapse = ref(false)
 
-const activeMenu = computed(() => route.path)
-const currentRoute = computed(() => route)
+const isHome = computed(() => route.path === '/home')
+const currentTitle = computed(() => route.meta?.title || '')
 </script>
-
-<style scoped>
-.app-container {
-  height: 100vh;
-}
-
-.app-aside {
-  background: #1d1e2c;
-  transition: width 0.2s;
-  overflow: hidden;
-}
-
-.app-aside .el-menu {
-  border-right: none;
-}
-
-.sidebar-logo {
-  height: 60px;
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-
-.logo-icon {
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, #409eff, #53a8ff);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 15px;
-  flex-shrink: 0;
-}
-
-.logo-text {
-  margin-left: 12px;
-  color: #fff;
-  font-size: 16px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.app-header {
-  height: 60px;
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.collapse-btn {
-  font-size: 20px;
-  cursor: pointer;
-  color: #606266;
-}
-
-.collapse-btn:hover {
-  color: #409eff;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.user-name {
-  font-size: 14px;
-  color: #303133;
-}
-
-.app-main {
-  background: #f5f7fa;
-  padding: 20px;
-  overflow-y: auto;
-}
-</style>

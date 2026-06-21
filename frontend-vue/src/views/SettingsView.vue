@@ -1,19 +1,19 @@
 <template>
-  <div>
+  <div class="max-w-6xl mx-auto px-6 py-8">
     <el-tabs v-model="activeTab" type="border-card">
       <!-- 文本模型 -->
       <el-tab-pane label="文本模型" name="text">
         <el-form label-width="120px" style="max-width:700px" v-loading="loading">
-          <div v-for="p in textProviders" :key="p.name" class="provider-section">
+          <div v-for="p in textProviders" :key="p.name" class="mb-2">
             <el-divider content-position="left">
-              <span class="provider-label">
-                <span class="provider-dot" :style="{ background: colors[p.name] }"></span>
+              <span class="flex items-center gap-2 text-sm font-medium">
+                <span class="w-2.5 h-2.5 rounded-full" :style="{ background: colors[p.name] }"></span>
                 {{ p.label }}
               </span>
             </el-divider>
             <el-form-item label="API Key">
-              <div class="key-row">
-                <el-input v-model="config[p.key]" show-password style="flex:1" :placeholder="p.ph" />
+              <div class="flex gap-2 items-center w-full">
+                <el-input v-model="config[p.key]" show-password class="flex-1" :placeholder="p.ph" />
                 <el-button type="primary" :loading="testing === p.name" @click="testConn(p)" :disabled="!config[p.key]">
                   {{ testing === p.name ? '测试中...' : '测试' }}
                 </el-button>
@@ -23,8 +23,8 @@
             </el-form-item>
             <el-form-item label="Base URL"><el-input v-model="config[p.url]" /></el-form-item>
             <el-form-item label="模型名称">
-              <div class="key-row">
-                <el-input v-model="config[p.model]" :placeholder="p.mp" style="flex:1" />
+              <div class="flex gap-2 items-center w-full">
+                <el-input v-model="config[p.model]" :placeholder="p.mp" class="flex-1" />
                 <el-button type="success" :loading="fetchingModels === p.name" @click="fetchModels(p)" :disabled="!config[p.key] || !config[p.url]">
                   {{ fetchingModels === p.name ? '获取中...' : '获取模型' }}
                 </el-button>
@@ -41,8 +41,8 @@
       <!-- 图像模型 -->
       <el-tab-pane label="图像生成" name="image">
         <el-form label-width="120px" style="max-width:700px" v-loading="loading">
-          <div class="provider-section">
-            <el-divider content-position="left"><span class="provider-label"><span class="provider-dot" style="background:#f59e0b"></span> 图像生成提供商</span></el-divider>
+          <div class="mb-2">
+            <el-divider content-position="left"><span class="flex items-center gap-2 text-sm font-medium"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> 图像生成提供商</span></el-divider>
             <el-form-item label="提供商">
               <el-radio-group v-model="config.image_provider">
                 <el-radio value="agnes">Agnes</el-radio>
@@ -52,11 +52,11 @@
           </div>
 
           <template v-if="config.image_provider === 'agnes'">
-            <div class="provider-section">
-              <el-divider content-position="left"><span class="provider-label"><span class="provider-dot" style="background:#f59e0b"></span> Agnes 图像模型</span></el-divider>
+            <div class="mb-2">
+              <el-divider content-position="left"><span class="flex items-center gap-2 text-sm font-medium"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Agnes 图像模型</span></el-divider>
               <el-form-item label="图像模型1">
-                <div class="key-row">
-                  <el-input v-model="config.agnes_image_model_1" placeholder="agnes-image-2.0-flash" style="flex:1" />
+                <div class="flex gap-2 items-center w-full">
+                  <el-input v-model="config.agnes_image_model_1" placeholder="agnes-image-2.0-flash" class="flex-1" />
                   <el-button type="primary" :loading="testing === 'agnes_image'" @click="testImageModel(config.agnes_image_model_1)" :disabled="!config.agnes_key">
                     {{ testing === 'agnes_image' ? '测试中...' : '测试' }}
                   </el-button>
@@ -71,8 +71,8 @@
           </template>
 
           <template v-else>
-            <div class="provider-section">
-              <el-divider content-position="left"><span class="provider-label"><span class="provider-dot" style="background:#8b5cf6"></span> 自定义图像接口</span></el-divider>
+            <div class="mb-2">
+              <el-divider content-position="left"><span class="flex items-center gap-2 text-sm font-medium"><span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span> 自定义图像接口</span></el-divider>
               <el-form-item label="API Key"><el-input v-model="config.custom_image_key" show-password placeholder="输入 API Key" /></el-form-item>
               <el-form-item label="Base URL"><el-input v-model="config.custom_image_url" placeholder="https://api.xxx.com/v1/images/generations" /></el-form-item>
               <el-form-item label="模型名称"><el-input v-model="config.custom_image_model" placeholder="model-name" /></el-form-item>
@@ -85,8 +85,8 @@
       <!-- 视频模型 -->
       <el-tab-pane label="视频生成" name="video">
         <el-form label-width="120px" style="max-width:700px" v-loading="loading">
-          <div class="provider-section">
-            <el-divider content-position="left"><span class="provider-label"><span class="provider-dot" style="background:#22c55e"></span> 视频生成提供商</span></el-divider>
+          <div class="mb-2">
+            <el-divider content-position="left"><span class="flex items-center gap-2 text-sm font-medium"><span class="w-2.5 h-2.5 rounded-full bg-green-500"></span> 视频生成提供商</span></el-divider>
             <el-form-item label="提供商">
               <el-radio-group v-model="config.video_provider">
                 <el-radio value="agnes">Agnes</el-radio>
@@ -96,11 +96,11 @@
           </div>
 
           <template v-if="config.video_provider === 'agnes'">
-            <div class="provider-section">
-              <el-divider content-position="left"><span class="provider-label"><span class="provider-dot" style="background:#22c55e"></span> Agnes 视频模型</span></el-divider>
+            <div class="mb-2">
+              <el-divider content-position="left"><span class="flex items-center gap-2 text-sm font-medium"><span class="w-2.5 h-2.5 rounded-full bg-green-500"></span> Agnes 视频模型</span></el-divider>
               <el-form-item label="视频模型">
-                <div class="key-row">
-                  <el-input v-model="config.agnes_video_model" placeholder="agnes-video-v2.0" style="flex:1" />
+                <div class="flex gap-2 items-center w-full">
+                  <el-input v-model="config.agnes_video_model" placeholder="agnes-video-v2.0" class="flex-1" />
                   <el-button type="primary" :loading="testing === 'agnes_video'" @click="testVideoModel(config.agnes_video_model)" :disabled="!config.agnes_key">
                     {{ testing === 'agnes_video' ? '测试中...' : '测试' }}
                   </el-button>
@@ -112,8 +112,8 @@
           </template>
 
           <template v-else>
-            <div class="provider-section">
-              <el-divider content-position="left"><span class="provider-label"><span class="provider-dot" style="background:#ef4444"></span> 自定义视频接口</span></el-divider>
+            <div class="mb-2">
+              <el-divider content-position="left"><span class="flex items-center gap-2 text-sm font-medium"><span class="w-2.5 h-2.5 rounded-full bg-red-500"></span> 自定义视频接口</span></el-divider>
               <el-form-item label="API Key"><el-input v-model="config.custom_video_key" show-password placeholder="输入 API Key" /></el-form-item>
               <el-form-item label="Base URL"><el-input v-model="config.custom_video_url" placeholder="https://api.xxx.com/v1/video/generations" /></el-form-item>
               <el-form-item label="模型名称"><el-input v-model="config.custom_video_model" placeholder="model-name" /></el-form-item>
@@ -153,10 +153,11 @@
     <el-dialog v-model="modelPickerVisible" title="选择模型" width="400px" :close-on-click-modal="false">
       <el-input v-model="modelSearch" placeholder="搜索模型..." clearable style="margin-bottom:12px" />
       <el-scrollbar height="300px">
-        <div v-for="model in filteredModels" :key="model" class="model-item" @click="selectModel(model)">
-          {{ model }}
-        </div>
-        <div v-if="!filteredModels.length" style="text-align:center;color:#999;padding:20px">无匹配模型</div>
+        <div v-for="model in filteredModels" :key="model"
+          class="px-3 py-2 cursor-pointer rounded text-xs font-mono hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+          @click="selectModel(model)"
+        >{{ model }}</div>
+        <div v-if="!filteredModels.length" class="text-center text-gray-400 py-5">无匹配模型</div>
       </el-scrollbar>
       <template #footer>
         <el-button @click="modelPickerVisible = false">取消</el-button>
@@ -300,12 +301,3 @@ const save = async () => {
   saving.value = false
 }
 </script>
-
-<style scoped>
-.provider-section { margin-bottom: 8px; }
-.provider-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
-.provider-dot { width: 10px; height: 10px; border-radius: 50%; }
-.key-row { display: flex; gap: 8px; align-items: center; width: 100%; }
-.model-item { padding: 8px 12px; cursor: pointer; border-radius: 4px; font-size: 13px; font-family: monospace; }
-.model-item:hover { background: var(--el-color-primary-light-9); color: var(--el-color-primary); }
-</style>

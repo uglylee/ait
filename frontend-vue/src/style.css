@@ -1,9 +1,6 @@
-:root {
-  --primary: #409eff;
-  --primary-light: #ecf5ff;
-  --sidebar-width: 220px;
-  --header-height: 60px;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 * {
   margin: 0;
@@ -16,269 +13,287 @@ html, body, #app {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
-.el-aside {
-  background: #1d1e2c;
-  overflow: hidden;
-}
-
-.el-header {
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-}
-
-.el-main {
-  background: #f5f7fa;
-  padding: 20px;
-  overflow-y: auto;
-}
-
-/* 侧边栏 */
-.sidebar-logo {
-  height: 60px;
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-
-.sidebar-logo .logo-icon {
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, #409eff, #53a8ff);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.sidebar-logo .logo-text {
-  margin-left: 12px;
-  color: #fff;
-  font-size: 16px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-  height: 50px;
-  color: rgba(255,255,255,0.65);
-  cursor: pointer;
-  transition: all 0.2s;
-  text-decoration: none;
-  font-size: 14px;
-  gap: 10px;
-}
-
-.menu-item:hover {
-  color: #fff;
-  background: rgba(255,255,255,0.05);
-}
-
-.menu-item.active {
-  color: #fff;
-  background: var(--primary);
-}
-
-.menu-item .menu-icon {
-  font-size: 18px;
-  width: 20px;
-  text-align: center;
-}
-
-/* 卡片 */
-.page-card {
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-}
-
-.page-card .card-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #ebeef5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.page-card .card-header h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.page-card .card-body {
-  padding: 20px;
-}
-
-/* 聊天消息 */
-.chat-msg-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-}
-
-.chat-msg {
-  display: flex;
-  margin-bottom: 20px;
-  gap: 12px;
-}
-
-.chat-msg.is-user {
-  flex-direction: row-reverse;
-}
-
-.chat-msg .msg-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.chat-msg.is-user .msg-avatar {
-  background: #409eff;
-}
-
-.chat-msg:not(.is-user) .msg-avatar {
-  background: #67c23a;
-}
-
-.chat-msg .msg-bubble {
-  max-width: 70%;
-  padding: 12px 16px;
-  border-radius: 8px;
-  line-height: 1.6;
-  font-size: 14px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.chat-msg.is-user .msg-bubble {
-  background: #409eff;
-  color: #fff;
-  border-top-right-radius: 2px;
-}
-
-.chat-msg:not(.is-user) .msg-bubble {
-  background: #f4f4f5;
-  color: #303133;
-  border-top-left-radius: 2px;
-}
-
-/* 统计卡片 */
-.stat-card {
-  background: #fff;
-  border-radius: 8px;
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-}
-
-.stat-card .stat-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-}
-
-.stat-card .stat-info .stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #303133;
-}
-
-.stat-card .stat-info .stat-label {
-  font-size: 13px;
-  color: #909399;
-  margin-top: 4px;
-}
-
-/* 工具卡片 */
-.tool-card {
-  background: #fff;
-  border-radius: 8px;
-  padding: 24px;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-  text-align: center;
-}
-
-.tool-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-}
-
-.tool-card .tool-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  margin: 0 auto 12px;
-}
-
-.tool-card .tool-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 4px;
-}
-
-.tool-card .tool-desc {
-  font-size: 12px;
-  color: #909399;
-}
-
-/* 滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
-  height: 6px;
 }
-
+::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: #dcdfe6;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #c0c4cc;
-}
-
-/* 代码块 */
 .msg-code {
   background: #1e1e1e;
   color: #d4d4d4;
-  padding: 12px;
-  border-radius: 6px;
+  padding: 12px 16px;
+  border-radius: 8px;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 13px;
   overflow-x: auto;
-  margin: 8px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ============ 现代化按钮样式 ============ */
+
+/* Element Plus 按钮全局覆盖 */
+.el-button {
+  --el-button-border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+/* Primary 按钮 - 渐变紫蓝 */
+.el-button--primary {
+  --el-button-bg-color: #6366f1;
+  --el-button-border-color: #6366f1;
+  --el-button-hover-bg-color: #4f46e5;
+  --el-button-hover-border-color: #4f46e5;
+  --el-button-active-bg-color: #4338ca;
+  --el-button-active-border-color: #4338ca;
+  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
+}
+.el-button--primary:hover {
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+  transform: translateY(-1px);
+}
+.el-button--primary:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.2);
+}
+
+/* Success 按钮 - 现代绿 */
+.el-button--success {
+  --el-button-bg-color: #10b981;
+  --el-button-border-color: #10b981;
+  --el-button-hover-bg-color: #059669;
+  --el-button-hover-border-color: #059669;
+  --el-button-active-bg-color: #047857;
+  --el-button-active-border-color: #047857;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+}
+.el-button--success:hover {
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);
+  transform: translateY(-1px);
+}
+
+/* Danger 按钮 - 现代红 */
+.el-button--danger {
+  --el-button-bg-color: #ef4444;
+  --el-button-border-color: #ef4444;
+  --el-button-hover-bg-color: #dc2626;
+  --el-button-hover-border-color: #dc2626;
+  --el-button-active-bg-color: #b91c1c;
+  --el-button-active-border-color: #b91c1c;
+  box-shadow: 0 1px 3px rgba(239, 68, 68, 0.3);
+}
+.el-button--danger:hover {
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
+  transform: translateY(-1px);
+}
+
+/* Warning 按钮 */
+.el-button--warning {
+  --el-button-bg-color: #f59e0b;
+  --el-button-border-color: #f59e0b;
+  --el-button-hover-bg-color: #d97706;
+  --el-button-hover-border-color: #d97706;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+}
+.el-button--warning:hover {
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+  transform: translateY(-1px);
+}
+
+/* Info 按钮 */
+.el-button--info {
+  --el-button-bg-color: #64748b;
+  --el-button-border-color: #64748b;
+  --el-button-hover-bg-color: #475569;
+  --el-button-hover-border-color: #475569;
+}
+
+/* 默认按钮 - 现代灰 */
+.el-button--default {
+  --el-button-border-color: #e2e8f0;
+  --el-button-hover-border-color: #6366f1;
+  --el-button-hover-text-color: #6366f1;
+  border-radius: 8px;
+}
+
+/* 文字按钮 - 圆角 + hover 背景 */
+.el-button.is-text {
+  border-radius: 8px;
+}
+.el-button.is-text:hover {
+  background: rgba(99, 102, 241, 0.08);
+  color: #6366f1;
+}
+
+/* 链接按钮 */
+.el-button.is-link {
+  color: #6366f1;
+}
+.el-button.is-link:hover {
+  color: #4f46e5;
+}
+
+/* 大号按钮 */
+.el-button--large {
+  --el-button-border-radius: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* 小号按钮 */
+.el-button--small {
+  --el-button-border-radius: 6px;
+}
+
+/* ============ 现代化输入框 ============ */
+.el-input__wrapper {
+  border-radius: 8px !important;
+  box-shadow: 0 0 0 1px #e2e8f0 inset !important;
+  transition: all 0.2s ease !important;
+}
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px #cbd5e1 inset !important;
+}
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px #6366f1 inset, 0 0 0 3px rgba(99, 102, 241, 0.1) inset !important;
+}
+
+/* ============ 现代化选择器 ============ */
+.el-select .el-input__wrapper {
+  border-radius: 8px !important;
+}
+
+/* ============ 现代化标签 ============ */
+.el-tag {
+  border-radius: 6px;
+  font-weight: 500;
+  border: none;
+}
+.el-tag--success {
+  background: #ecfdf5;
+  color: #059669;
+}
+.el-tag--danger {
+  background: #fef2f2;
+  color: #dc2626;
+}
+.el-tag--warning {
+  background: #fffbeb;
+  color: #d97706;
+}
+.el-tag--info {
+  background: #f1f5f9;
+  color: #64748b;
+}
+.el-tag--primary {
+  background: #eef2ff;
+  color: #6366f1;
+}
+
+/* ============ 现代化开关 ============ */
+.el-switch {
+  --el-switch-on-color: transparent;
+  --el-switch-off-color: #e2e8f0;
+}
+.el-switch .el-switch__core {
+  border-radius: 999px;
+  border: 2px solid #e2e8f0;
+  background: #e2e8f0;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  height: 24px;
+  width: 44px;
+}
+.el-switch .el-switch__core .el-switch__action {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  top: 1px;
+}
+.el-switch.is-checked .el-switch__core {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-color: transparent;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+.el-switch.is-checked .el-switch__core .el-switch__action {
+  transform: translateX(20px);
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3);
+}
+.el-switch .el-switch__label {
+  font-size: 13px;
+  color: #94a3b8;
+  transition: color 0.2s;
+}
+.el-switch.is-checked .el-switch__label {
+  color: #6366f1;
+  font-weight: 500;
+}
+
+/* ============ 现代化进度条 ============ */
+.el-progress-bar__outer {
+  border-radius: 4px;
+}
+.el-progress-bar__inner {
+  border-radius: 4px;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6) !important;
+}
+
+/* ============ 现代化对话框 ============ */
+.el-dialog {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+.el-dialog__header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.el-dialog__title {
+  font-weight: 600;
+  font-size: 16px;
+  color: #1e293b;
+}
+.el-dialog__body {
+  padding: 20px 24px;
+}
+.el-dialog__footer {
+  padding: 12px 24px 20px;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* ============ 现代化表格 ============ */
+.el-table th.el-table__cell {
+  background: #f8fafc !important;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.el-table td.el-table__cell {
+  border-bottom-color: #f1f5f9;
+}
+
+/* ============ 现代化 Tabs ============ */
+.el-tabs__item.is-active {
+  color: #6366f1;
+  font-weight: 600;
+}
+.el-tabs__active-bar {
+  background: #6366f1;
+  border-radius: 2px;
+}
+
+/* ============ 现代化表单标签 ============ */
+.el-form-item__label {
+  font-weight: 500;
+  color: #374151;
 }

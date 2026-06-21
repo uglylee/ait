@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
-  { path: '/', redirect: '/dashboard' },
+  { path: '/', redirect: '/home' },
+  { path: '/home', name: 'Home', component: () => import('../views/HomeView.vue'), meta: { title: '' } },
   { path: '/dashboard', name: 'Dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '工作台' } },
   { path: '/chat', name: 'Chat', component: () => import('../views/ChatView.vue'), meta: { title: 'AI 对话' } },
   { path: '/codegen', name: 'CodeGen', component: () => import('../views/CodeGenView.vue'), meta: { title: '代码生成' } },
