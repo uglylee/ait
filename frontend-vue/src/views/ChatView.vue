@@ -222,15 +222,23 @@
           </div>
         </template>
 
-        <!-- 任务进度面板 -->
-        <div v-if="taskProgress" class="task-progress-panel">
-          <div class="task-progress-header">
-            <span class="task-icon">📋</span>
-            <span>任务执行中</span>
-            <span class="task-step-count">{{ taskSteps.length }}/{{ taskProgress.total_steps || '?' }} 步</span>
+        <!-- Goal Status Panel (Codex-style) -->
+        <div v-if="goalStatus" class="goal-panel">
+          <div class="goal-header">
+            <span class="goal-status-dot" :class="goalStatus.status"></span>
+            <span class="goal-label">{{ goalStatus.status === 'complete' ? 'Done' : goalStatus.status === 'blocked' ? 'Blocked' : goalStatus.status === 'budget_limited' ? 'Budget exceeded' : 'Working' }}</span>
+            <span class="goal-round">Round {{ goalStatus.round }}/{{ goalStatus.maxRounds }}</span>
           </div>
-          <div class="task-progress-bar">
-            <div class="task-progress-fill" :style="{ width: ((taskSteps.length / (taskProgress.total_steps || 1)) * 100) + '%' }"></div>
+          <div class="goal-objective">{{ goalStatus.objective }}</div>
+          <div v-if="goalStatus.tokensUsed" class="goal-tokens">Tokens: {{ goalStatus.tokensUsed.toLocaleString() }}</div>
+          <!-- Tool call steps -->
+          <div v-if="goalStatus.steps.length" class="goal-steps" ref="goalStepsRef">
+            <div v-for="(step, si) in goalStatus.steps" :key="si" class="goal-step" :class="step.type" :ref="si === goalStatus.steps.length - 1 ? 'lastGoalStep' : null">
+              <span v-if="step.type === 'tool_call'" class="step-icon">&#x1f527;</span>
+              <span v-if="step.type === 'tool_result'" class="step-icon">&#x2705;</span>
+              <span v-if="step.type === 'thinking'" class="step-icon">&#x1f4ad;</span>
+              <span class="step-text">{{ step.text }}</span>
+            </div>
           </div>
         </div>
 
@@ -292,6 +300,9 @@
               </button>
               <button class="toolbar-tag" :class="{ active: showSuggestions }" @click="showSuggestions = !showSuggestions">
                 <span>💡</span> 推荐问题
+              </button>
+              <button class="toolbar-tag" :class="{ active: automationMode }" @click="automationMode = !automationMode">
+                <span>🤖</span> 自动化
               </button>
               <button class="toolbar-tag model-tag">
                 <span>🧠</span> {{ provider }}
@@ -418,6 +429,7 @@ const loading = ref(false)
 const streamingContent = ref('')
 const suggestions = ref([])
 const showSuggestions = ref(false)
+const automationMode = ref(false)
 const provider = ref('')
 const providerList = ref([])
 const msgListRef = ref(null)
@@ -429,8 +441,10 @@ const attachedImages = ref([])
 
 const webSearch = ref(false)
 
-const taskProgress = ref(null)
-const taskSteps = ref([])
+// Codex-style goal tracking
+const goalStatus = ref(null)
+const goalStepsRef = ref(null)
+const lastGoalStep = ref(null)
 const currentThought = ref('')
 const streamingReasoning = ref('')
 const showReasoning = ref(true)
@@ -439,6 +453,7 @@ const enableThinking = ref(true)
 const showModelSwitch = ref(false)
 let currentAbortController = null
 let aborted = false
+let currentAutoRunId = null
 const allQuickActions = [
   { icon: '📋', label: '任务', prompt: '帮我制定一个任务计划' },
   { icon: '🎨', label: 'AI 生图', prompt: '帮我生成一张图片' },
@@ -556,6 +571,7 @@ const send = async () => {
   streamingReasoning.value = ''
   suggestions.value = []
   currentThought.value = ''
+  goalStatus.value = null
 
   // 新对话先创建 conversation
   if (!currentConvId.value) {
@@ -588,11 +604,9 @@ const send = async () => {
         streamingContent.value = ''
         streamingReasoning.value = ''
       } else if (error && !aborted) {
-        messages.value.push({ role: 'assistant', content: `请求失败: ${error}` })
+        messages.value.push({ role: 'assistant', content: `Request failed: ${error}` })
       }
       loading.value = false
-      taskProgress.value = null
-      taskSteps.value = []
       currentThought.value = ''
       scrollToBottom()
       loadConversations()
@@ -604,41 +618,81 @@ const send = async () => {
           if (reasoningRef.value) reasoningRef.value.scrollTop = reasoningRef.value.scrollHeight
         })
         scrollToBottom()
+      } else if (toolEvent.type === 'goal_start') {
+        currentAutoRunId = toolEvent.data.run_id || null
+        goalStatus.value = {
+          objective: toolEvent.data.objective,
+          status: 'active',
+          round: 0,
+          maxRounds: toolEvent.data.max_rounds,
+          tokensUsed: 0,
+          steps: []
+        }
+        scrollToBottom()
+      } else if (toolEvent.type === 'round_start') {
+        if (goalStatus.value) {
+          goalStatus.value.round = toolEvent.data.round
+          goalStatus.value.maxRounds = toolEvent.data.max_rounds
+          goalStatus.value.tokensUsed = toolEvent.data.tokens_used
+        }
+      } else if (toolEvent.type === 'tool_call') {
+        if (goalStatus.value) {
+          goalStatus.value.steps.push({ type: 'tool_call', text: `${toolEvent.data.name}(${toolEvent.data.input})` })
+          scrollGoalSteps()
+        }
+        scrollToBottom()
+      } else if (toolEvent.type === 'tool_result') {
+        if (goalStatus.value) {
+          goalStatus.value.steps.push({ type: 'tool_result', text: `${toolEvent.data.name}: ${toolEvent.data.result}` })
+          scrollGoalSteps()
+        }
+        scrollToBottom()
+      } else if (toolEvent.type === 'goal_event') {
+        if (goalStatus.value) {
+          goalStatus.value.status = toolEvent.data.type
+          if (toolEvent.data.round) goalStatus.value.round = toolEvent.data.round
+        }
+        // Reset run_id on terminal states
+        if (['complete', 'blocked', 'budget_limited', 'cancelled'].includes(toolEvent.data.type)) {
+          currentAutoRunId = null
+        }
+        scrollToBottom()
       } else if (toolEvent.type === 'status') {
         streamingContent.value += `\n\n⏳ ${toolEvent.message}\n`
         scrollToBottom()
-              } else if (toolEvent.type === 'intent') {
-        const intent = toolEvent.data
-        const detail = intent.detail || ''
-        if (detail) {
-          streamingContent.value += `\n\n🔍 ${detail.replace(/\n/g, '\n   ')}\n`
-          scrollToBottom()
-        }
       } else if (toolEvent.type === 'thought') {
         currentThought.value = toolEvent.data
-        streamingContent.value += `\n\n💭 ${toolEvent.data}\n`
+        if (goalStatus.value) {
+          goalStatus.value.steps.push({ type: 'thinking', text: toolEvent.data })
+          scrollGoalSteps()
+        }
         scrollToBottom()
       } else if (toolEvent.type === 'task_start') {
-        taskProgress.value = toolEvent.data
-        taskSteps.value = []
-        streamingContent.value += `\n\n📋 开始执行任务（共 ${toolEvent.data.total_steps || '?'} 步）\n`
         scrollToBottom()
       } else if (toolEvent.type === 'step_complete') {
-        const step = toolEvent.data
-        taskSteps.value.push(step)
-        streamingContent.value += `\n✅ 步骤完成: ${step.step_id}\n`
         scrollToBottom()
       } else if (toolEvent.type === 'clarification') {
         streamingContent.value += `\n\n❓ ${toolEvent.question}\n`
         scrollToBottom()
       } else if (toolEvent.type === 'result') {
-        const r = toolEvent.data
-        streamingContent.value += `\n✅ 工具 ${r.tool} 执行完成\n`
         scrollToBottom()
       }
     },
-    { web_search: webSearch.value, signal: abortCtrl.signal, enable_thinking: enableThinking.value, suggest: showSuggestions.value }
+    { web_search: webSearch.value, signal: abortCtrl.signal, enable_thinking: enableThinking.value, suggest: showSuggestions.value, automation: automationMode.value }
   )
+}
+
+const scrollGoalSteps = () => {
+  nextTick(() => {
+    if (lastGoalStep.value) {
+      const el = Array.isArray(lastGoalStep.value) ? lastGoalStep.value[0] : lastGoalStep.value
+      if (el && el.$el) el.$el.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      else if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+    if (goalStepsRef.value) {
+      goalStepsRef.value.scrollTop = goalStepsRef.value.scrollHeight
+    }
+  })
 }
 
 const newChat = () => {
@@ -647,8 +701,8 @@ const newChat = () => {
   streamingContent.value = ''
   streamingReasoning.value = ''
   loading.value = false
-  taskProgress.value = null
-  taskSteps.value = []
+  goalStatus.value = null
+  currentAutoRunId = null
   currentThought.value = ''
   systemPrompt.value = ''
   showSystemPrompt.value = false
@@ -710,6 +764,12 @@ const confirmRename = async (conv) => {
 const cancelRename = () => { renamingId.value = null }
 
 const stopGeneration = () => {
+  // Send cancel request to backend (Redis-based)
+  if (currentAutoRunId) {
+    fetch(`/api/v1/automation/cancel?run_id=${currentAutoRunId}`, { method: 'POST' }).catch(() => {})
+    currentAutoRunId = null
+  }
+  // Also abort the HTTP connection immediately
   if (currentAbortController) {
     currentAbortController.abort()
     currentAbortController = null
@@ -1328,43 +1388,56 @@ const openImgPreview = (src) => {
 .mi-arrow { margin-left: auto; color: #ccc; }
 .menu-item.danger { color: #f44336; }
 
-/* 任务进度面板 */
-.task-progress-panel {
-  margin: 8px 0;
+/* Goal Panel (Codex-style) */
+.goal-panel {
+  margin: 8px 24px;
   padding: 12px 16px;
   background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
   border: 1px solid #bae6fd;
   border-radius: 12px;
-  max-width: 400px;
+  max-width: 600px;
+  font-size: 13px;
 }
-.task-progress-header {
+.goal-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #0369a1;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
-.task-icon { font-size: 16px; }
-.task-step-count {
-  margin-left: auto;
+.goal-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  animation: pulse 1.5s infinite;
+}
+.goal-status-dot.complete { background: #22c55e; animation: none; }
+.goal-status-dot.blocked { background: #ef4444; animation: none; }
+.goal-status-dot.budget_limited { background: #f59e0b; animation: none; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.goal-label { font-weight: 600; color: #0369a1; }
+.goal-round { margin-left: auto; font-size: 12px; color: #0284c7; }
+.goal-objective { color: #555; margin-bottom: 4px; font-size: 12px; }
+.goal-tokens { color: #888; font-size: 11px; margin-bottom: 6px; }
+.goal-steps {
+  max-height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid #bae6fd;
+  padding-top: 6px;
+}
+.goal-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
   font-size: 12px;
-  font-weight: 400;
-  color: #0284c7;
+  color: #444;
 }
-.task-progress-bar {
-  height: 4px;
-  background: #bae6fd;
-  border-radius: 2px;
-  overflow: hidden;
-}
-.task-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #0ea5e9, #06b6d4);
-  border-radius: 2px;
-  transition: width 0.3s ease;
-}
+.goal-step.tool_call { color: #0369a1; }
+.goal-step.tool_result { color: #16a34a; }
+.goal-step.thinking { color: #7c3aed; }
+.step-icon { flex-shrink: 0; font-size: 12px; }
+.step-text { word-break: break-all; }
 
 /* 过渡动画 */
 .slide-enter-active, .slide-leave-active { transition: all 0.25s ease; }

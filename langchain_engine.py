@@ -232,7 +232,7 @@ class CalculatorTool(Tool):
     """计算器工具"""
     
     def __init__(self):
-        super().__init__("calculator", "计算数学表达式，例如: 2+3*4")
+        super().__init__("calculator", "Evaluate a math expression. Input: a valid Python math expression, e.g. '2+3*4', '100/7', '2**10'. Returns the numeric result.")
     
     def run(self, input: str) -> str:
         try:
@@ -246,7 +246,7 @@ class OpenAppTool(Tool):
     """打开应用工具"""
     
     def __init__(self):
-        super().__init__("open_app", "打开本地应用程序，如chrome、notepad、vscode等")
+        super().__init__("open_app", "Open a local application by name. Supported: chrome, edge, notepad, vscode, code, explorer, finder, terminal, cmd, calculator, wechat. Input: app name as a string.")
     
     def run(self, input: str) -> str:
         import subprocess
@@ -294,25 +294,33 @@ class OpenUrlTool(Tool):
     """打开网页工具"""
     
     def __init__(self):
-        super().__init__("open_url", "在浏览器中打开网页，如 https://www.baidu.com")
+        super().__init__("open_url", "Open a URL in the default browser or open a local file with its associated application. Input: a URL (http/https) or a local file path.")
     
     def run(self, input: str) -> str:
         import subprocess
         import platform
+        import os
         
-        url = input.strip()
-        if not url.startswith("http"):
-            url = "https://" + url
+        target = input.strip()
+        
+        # 处理 file:/// URL
+        if target.startswith("file:///"):
+            target = target[8:] if platform.system() == "Windows" else target[7:]
+            target = target.replace('/', '\\') if platform.system() == "Windows" else target
+        
+        # 检查文件是否存在
+        if not target.startswith("http") and not os.path.exists(target):
+            return f"文件不存在: {target}"
         
         system = platform.system().lower()
         try:
             if system == "windows":
-                subprocess.Popen(f'start {url}', shell=True)
+                os.startfile(target)
             elif system == "darwin":
-                subprocess.Popen(['open', url])
+                subprocess.Popen(['open', target])
             else:
-                subprocess.Popen(['xdg-open', url])
-            return f"已打开网页: {url}"
+                subprocess.Popen(['xdg-open', target])
+            return f"已打开: {target}"
         except Exception as e:
             return f"打开失败: {e}"
 
@@ -321,7 +329,7 @@ class OpenFileTool(Tool):
     """打开文件工具"""
     
     def __init__(self):
-        super().__init__("open_file", "打开本地文件，如C:\\Users\\test.txt")
+        super().__init__("open_file", "Open a local file using the OS default application. Input: absolute file path, e.g. 'C:\\Users\\test.txt' or '/home/user/doc.pdf'.")
     
     def run(self, input: str) -> str:
         import os
@@ -348,7 +356,7 @@ class RunCommandTool(Tool):
     """执行系统命令工具"""
     
     def __init__(self):
-        super().__init__("run_command", "执行系统命令，如 ipconfig、dir、ls 等")
+        super().__init__("run_command", "Execute a shell command and return its stdout/stderr. Input: a valid shell command string, e.g. 'ipconfig', 'dir C:\\', 'ls -la', 'python --version', 'pip install requests'. Timeout: 30 seconds.")
     
     def run(self, input: str) -> str:
         import subprocess
@@ -366,7 +374,7 @@ class CodeGeneratorTool(Tool):
     """代码生成 + 运行工具"""
     
     def __init__(self):
-        super().__init__("code_generate", "根据描述生成代码项目并运行，输入格式: 项目名|描述|语言")
+        super().__init__("code_generate", "Generate a code project from a description and run it. Input format: 'project_name|description|language'. Language options: python, html, js/javascript. Example: 'my_app|A Flask web server|python'. The tool creates the project files and attempts to run them.")
     
     def run(self, input: str) -> str:
         import os
@@ -427,7 +435,7 @@ class CodeGeneratorTool(Tool):
             with open(os.path.join(project_dir, "README.md"), "w", encoding="utf-8") as f:
                 f.write(f"# {project_name}\n\n{description}\n\n## 运行方式\n\n直接打开 index.html\n")
             
-            return f"项目已生成: {project_dir}\n\n文件: index.html, README.md\n\n--- 代码预览 ---\n```html\n{code[:1500]}\n```\n\n请用浏览器打开 index.html 查看效果"
+            return f"项目已生成: {file_path}\n\n请用 open_url 工具打开此文件"
         
         elif lang.lower() in ["js", "javascript", "node"]:
             file_path = os.path.join(project_dir, "main.js")
@@ -447,49 +455,58 @@ class CodeGeneratorTool(Tool):
             return f"项目已生成: {project_dir}\n\n文件: main.{lang}\n\n--- 代码预览 ---\n```\n{code[:1500]}\n```"
     
     def _generate_code(self, description: str, lang: str) -> str:
-        """根据描述生成代码 - 使用智能模板，不依赖LLM避免超时"""
-        desc_lower = description.lower()
-        
-        # 智能匹配模板
-        if lang.lower() in ["python", "py"]:
-            if any(k in desc_lower for k in ["贪吃蛇", "snake"]):
-                return self._snake_game()
-            elif any(k in desc_lower for k in ["爬虫", "crawl", "spider", "抓取"]):
-                return self._web_crawler(description)
-            elif any(k in desc_lower for k in ["计算器", "calculator"]):
-                return self._calculator_py()
-            elif any(k in desc_lower for k in ["待办", "todo", "任务"]):
-                return self._todo_py()
-            elif any(k in desc_lower for k in ["天气", "weather"]):
-                return self._weather_py()
-            elif any(k in desc_lower for k in ["文件", "file"]):
-                return self._file_manager_py()
-            elif any(k in desc_lower for k in ["聊天", "chat", "机器人", "robot"]):
-                return self._chatbot_py()
-            else:
-                return self._general_py(description)
-        
-        elif lang.lower() in ["html", "web"]:
-            if any(k in desc_lower for k in ["待办", "todo", "任务"]):
-                return self._todo_html()
-            elif any(k in desc_lower for k in ["聊天", "chat"]):
-                return self._chat_html()
-            elif any(k in desc_lower for k in ["时钟", "clock", "时间"]):
-                return self._clock_html()
-            elif any(k in desc_lower for k in ["登录", "login", "注册"]):
-                return self._login_html()
-            elif any(k in desc_lower for k in ["仪表盘", "dashboard", "后台"]):
-                return self._dashboard_html()
-            else:
-                return self._general_html(description)
-        
-        elif lang.lower() in ["js", "javascript", "node"]:
-            if any(k in desc_lower for k in ["服务器", "server", "api"]):
-                return self._http_server_js()
-            else:
-                return self._general_js(description)
-        
-        return self._general_py(description)
+        """调用LLM生成真实代码"""
+        lang_map = {"python": "Python", "py": "Python", "html": "HTML/CSS/JavaScript", "web": "HTML/CSS/JavaScript", "js": "JavaScript", "javascript": "JavaScript", "node": "Node.js"}
+        lang_name = lang_map.get(lang.lower(), lang)
+
+        prompt = f"""你是一个高级程序员。请根据以下描述生成一个完整可运行的{lang_name}项目。
+
+描述: {description}
+
+要求:
+1. 代码必须完整、可直接运行，不要省略任何部分
+2. 代码要美观、功能完整
+3. 只输出代码，不要任何解释文字
+4. 不要用markdown代码块包裹
+
+代码:"""
+
+        try:
+            from llm_config import get_llm_router
+            router = get_llm_router()
+            llm = router.get_provider(None)
+            import httpx
+            import json as _json
+
+            with httpx.Client(timeout=120.0) as client:
+                resp = client.post(
+                    llm.chat_endpoint,
+                    headers={"Authorization": f"Bearer {llm.api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": llm.default_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.3,
+                        "max_tokens": 8192,
+                    }
+                )
+                data = resp.json()
+                code = data["choices"][0]["message"]["content"]
+
+            code = code.strip()
+            if code.startswith("```"):
+                lines = code.split("\n")
+                lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                code = "\n".join(lines)
+
+            if len(code) < 50:
+                return self._fallback_code(description, lang)
+
+            return code
+        except Exception as e:
+            print(f"[CodeGenerator] LLM call failed: {e}, using fallback")
+            return self._fallback_code(description, lang)
     
     def _fallback_code(self, description: str, lang: str) -> str:
         """LLM失败时的模板代码"""
@@ -575,12 +592,60 @@ server.listen(PORT, () => {{
 '''
         return f'print("{description}")'
 
+    def _general_py(self, description: str) -> str:
+        return f'''"""
+{description}
+"""
+import sys
+
+def main():
+    print("=" * 50)
+    print(f"项目: {description}")
+    print("=" * 50)
+    print("这是一个示例项目框架。")
+    print("请根据需求修改 main.py 文件。")
+
+if __name__ == "__main__":
+    main()
+'''
+
+    def _general_html(self, description: str) -> str:
+        return f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{description}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, sans-serif; background: #f5f5f5; padding: 20px; }}
+        .container {{ max-width: 800px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; margin-bottom: 20px; }}
+        p {{ color: #666; line-height: 1.8; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{description}</h1>
+        <p>这是一个自动生成的网页项目。</p>
+    </div>
+</body>
+</html>'''
+
+    def _general_js(self, description: str) -> str:
+        return f'''/**
+ * {description}
+ */
+console.log("{description}");
+console.log("项目已创建，请根据需求修改。");
+'''
+
 
 class ListDirTool(Tool):
     """列出目录工具"""
     
     def __init__(self):
-        super().__init__("list_dir", "列出目录内容，如 C:\\Users 或 . 当前目录")
+        super().__init__("list_dir", "List files and directories at a given path. Input: a directory path, e.g. 'C:\\Users', '.', '/home'. Defaults to current directory if empty.")
     
     def run(self, input: str) -> str:
         import os
@@ -609,7 +674,7 @@ class WebSearchTool(Tool):
     """搜索工具（DuckDuckGo）"""
     
     def __init__(self):
-        super().__init__("web_search", "搜索互联网获取信息，输入搜索关键词")
+        super().__init__("web_search", "Search the internet for information. Input: search query string. Returns top 5 results with titles, snippets, and URLs.")
     
     def run(self, input: str) -> str:
         try:
@@ -633,7 +698,7 @@ class DateTimeTool(Tool):
     """日期时间工具"""
     
     def __init__(self):
-        super().__init__("datetime", "获取当前日期和时间")
+        super().__init__("datetime", "Get the current date and time. Input: ignored, any string is fine.")
     
     def run(self, input: str = "") -> str:
         from datetime import datetime

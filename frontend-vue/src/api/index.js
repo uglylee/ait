@@ -14,7 +14,7 @@ export const deleteConversation = (id) => api.delete(`/conversations/${id}`)
 
 // 流式对话（SSE via Fetch）
 export const chatStream = (conversationId, message, provider, systemPrompt, images, onChunk, onDone, onToolEvent, options = {}) => {
-  const body = { conversation_id: conversationId, message, provider, web_search: options.web_search === true, suggest: options.suggest === true }
+  const body = { conversation_id: conversationId, message, provider, web_search: options.web_search === true, suggest: options.suggest === true, automation: options.automation === true }
   if (options.enable_thinking !== undefined) body.enable_thinking = options.enable_thinking
   if (systemPrompt) body.system_prompt = systemPrompt
   if (images && images.length) body.images = images
@@ -46,10 +46,15 @@ export const chatStream = (conversationId, message, provider, systemPrompt, imag
           if (parsed.intent && onToolEvent) onToolEvent({ type: 'intent', data: parsed.intent })
           if (parsed.thought && onToolEvent) onToolEvent({ type: 'thought', data: parsed.thought, step_id: parsed.step_id })
           if (parsed.tool_status && onToolEvent) onToolEvent({ type: 'status', message: parsed.tool_status })
-          if (parsed.tool_result && onToolEvent) onToolEvent({ type: 'result', data: parsed.tool_result })
           if (parsed.clarification && onToolEvent) onToolEvent({ type: 'clarification', question: parsed.clarification })
           if (parsed.task_start && onToolEvent) onToolEvent({ type: 'task_start', data: parsed.task_start })
           if (parsed.step_complete && onToolEvent) onToolEvent({ type: 'step_complete', data: parsed.step_complete })
+          // Codex-style goal events
+          if (parsed.goal_start && onToolEvent) onToolEvent({ type: 'goal_start', data: parsed.goal_start })
+          if (parsed.round_start && onToolEvent) onToolEvent({ type: 'round_start', data: parsed.round_start })
+          if (parsed.tool_call && onToolEvent) onToolEvent({ type: 'tool_call', data: parsed.tool_call })
+          if (parsed.tool_result && onToolEvent) onToolEvent({ type: 'tool_result', data: parsed.tool_result })
+          if (parsed.goal_event && onToolEvent) onToolEvent({ type: 'goal_event', data: parsed.goal_event })
           if (parsed.suggestions) { onDone && onDone(null, parsed.suggestions); return }
           if (parsed.error) { onDone && onDone(parsed.error); return }
         } catch (e) {}

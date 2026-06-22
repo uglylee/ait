@@ -48,6 +48,57 @@ agents_col = db["agents"]
 settings_col = db["settings"]
 tasks_col = db["tasks"]
 
+# ============ Automation Cancel (Redis) ============
+
+_auto_cancelled = set()
+_auto_redis = None
+
+def _get_auto_redis():
+    global _auto_redis
+    if _auto_redis is None:
+        try:
+            import redis
+            _auto_redis = redis.Redis(
+                host="localhost", port=6379, password="ai_redis_2024",
+                decode_responses=True, socket_connect_timeout=2
+            )
+            _auto_redis.ping()
+        except Exception:
+            _auto_redis = False
+    return _auto_redis
+
+def cancel_auto_run(run_id: str) -> bool:
+    _auto_cancelled.add(run_id)
+    r = _get_auto_redis()
+    if r:
+        try:
+            r.set(f"auto:cancel:{run_id}", "1", ex=600)
+        except Exception:
+            pass
+    return True
+
+def _is_auto_cancelled(run_id: str) -> bool:
+    if run_id in _auto_cancelled:
+        return True
+    r = _get_auto_redis()
+    if r:
+        try:
+            if r.get(f"auto:cancel:{run_id}") == "1":
+                _auto_cancelled.add(run_id)
+                return True
+        except Exception:
+            pass
+    return False
+
+def _cleanup_auto_run(run_id: str):
+    _auto_cancelled.discard(run_id)
+    r = _get_auto_redis()
+    if r:
+        try:
+            r.delete(f"auto:cancel:{run_id}")
+        except Exception:
+            pass
+
 # ============ Orchestrator 初始化 ==============
 
 _orchestrator = None
@@ -135,6 +186,7 @@ class ChatStreamRequest(BaseModel):
     images: Optional[List[str]] = None
     enable_thinking: Optional[bool] = True
     suggest: Optional[bool] = False
+    automation: Optional[bool] = False
 
 class AgentCreate(BaseModel):
     name: str
@@ -430,63 +482,337 @@ async def chat_stream(request: ChatStreamRequest):
     async def generate():
         try:
             router = get_llm_router()
-            
-            messages = []
-            if request.system_prompt:
-                messages.append({"role": "system", "content": request.system_prompt})
-            
-            for msg in history:
-                messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
-            
-            if request.images:
-                content = [{"type": "text", "text": request.message}]
-                for img in request.images:
-                    content.append({"type": "image_url", "image_url": {"url": img}})
-                messages.append({"role": "user", "content": content})
-            else:
-                messages.append({"role": "user", "content": request.message})
-            
-            async for chunk in router.chat_stream(messages, provider=request.provider, model=request.model, enable_thinking=request.enable_thinking):
-                if chunk == "[DONE]":
-                    continue
-                if chunk.startswith('{"type": "reasoning"'):
-                    try:
-                        r = json.loads(chunk)
-                        yield f"data: {json.dumps({'reasoning': r['content']})}\n\n"
-                    except:
-                        pass
-                else:
-                    collected[0] += chunk
-                    yield f"data: {json.dumps({'content': chunk})}\n\n"
 
-            if collected[0] and len(collected[0]) > 5 and request.suggest:
-                try:
-                    suggest_prompt = [
-                        {"role": "system", "content": "你是一个助手。根据用户的问题和AI的回答，生成3个相关的后续问题，让用户可以继续深入了解。只输出问题，每行一个，不要编号，不要其他内容。"},
-                        {"role": "user", "content": f"用户问题：{request.message}\nAI回答：{collected[0][:500]}"}
-                    ]
-                    llm = router.get_provider(request.provider)
-                    import httpx as _httpx
-                    async with _httpx.AsyncClient(timeout=30.0) as _client:
-                        _resp = await _client.post(
-                            llm.chat_endpoint,
-                            headers={"Authorization": f"Bearer {llm.api_key}", "Content-Type": "application/json"},
-                            json={
-                                "model": request.model or llm.default_model,
-                                "messages": suggest_prompt,
-                                "temperature": 0.7,
-                                "enable_thinking": False,
+            # ========== 自动化模式 (Codex-style agent loop) ==========
+            auto_run_id = None
+            if request.automation:
+                import asyncio as _asyncio
+                import httpx as _httpx
+                import platform as _platform
+                from datetime import datetime as _datetime
+                from langchain_engine import ALL_TOOLS
+                tool_map = {t.name: t for t in ALL_TOOLS}
+
+                # --- Generate run_id for cancel support ---
+                auto_run_id = str(uuid.uuid4())[:8]
+                _auto_cancelled.add(auto_run_id)
+                _auto_cancelled.discard(auto_run_id)  # clear any stale state
+
+                # --- Tool definitions (OpenAI function calling format) ---
+                auto_tools = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "input": {"type": "string", "description": "Tool input parameter"}
+                                },
+                                "required": ["input"]
                             }
-                        )
-                        _data = _resp.json()
-                        _content = _data["choices"][0]["message"]["content"]
-                        suggestions = [s.strip() for s in _content.strip().split("\n") if s.strip() and len(s.strip()) > 3]
-                        suggestions = suggestions[:3]
-                        if suggestions:
-                            yield f"data: {json.dumps({'suggestions': suggestions})}\n\n"
-                except Exception as e:
-                    print(f"[SUGGEST ERROR] {e}")
+                        }
+                    } for t in ALL_TOOLS
+                ]
 
+                # --- Codex-style system prompt (identity + environment) ---
+                os_name = _platform.system()
+                cwd = os.path.abspath(".")
+                current_time = _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                tools_list = ", ".join([t.name for t in ALL_TOOLS])
+
+                identity_prompt = (
+                    "You are an AI coding agent that helps users complete tasks by using tools.\n"
+                    "Be concise, clear, and efficient. Keep responses tight and useful.\n\n"
+                    "## Key Rules\n"
+                    "- Use tools to get real results. Never guess or explain when a tool can provide the answer.\n"
+                    "- Execute commands directly. Do not ask the user for permission.\n"
+                    "- After using tools, present the results clearly.\n"
+                    "- If a task requires multiple steps, continue working until the objective is achieved.\n"
+                )
+
+                env_prompt = (
+                    f"## Environment\n"
+                    f"- OS: {os_name}\n"
+                    f"- Working directory: {cwd}\n"
+                    f"- Current time: {current_time}\n"
+                    f"- Available tools: {tools_list}\n"
+                )
+
+                system_content = request.system_prompt or (identity_prompt + "\n" + env_prompt)
+
+                # --- Goal state (Codex continuation mechanism) ---
+                goal_objective = request.message
+                goal_status = "active"  # active | complete | blocked | budget_limited
+                blocked_count = 0
+                tokens_used = 0
+                token_budget = 200000  # generous default
+
+                def estimate_tokens(msgs):
+                    total = 0
+                    for m in msgs:
+                        total += len(str(m.get("content", ""))) // 4
+                        if "tool_calls" in m:
+                            total += len(json.dumps(m["tool_calls"])) // 4
+                    return total
+
+                def build_continuation_prompt():
+                    remaining = max(0, token_budget - tokens_used)
+                    return (
+                        "Continue working toward the active goal.\n\n"
+                        f"<objective>\n{goal_objective}\n</objective>\n\n"
+                        "Rules:\n"
+                        "- This goal persists across turns. Keep the full objective intact.\n"
+                        "- If it cannot be finished now, make concrete progress and leave the goal active.\n"
+                        "- Temporary rough edges are acceptable while work is moving forward.\n\n"
+                        f"Budget:\n"
+                        f"- Tokens used: {tokens_used}\n"
+                        f"- Token budget: {token_budget}\n"
+                        f"- Tokens remaining: {remaining}\n\n"
+                        "Completion audit:\n"
+                        "Before deciding the goal is achieved, verify against actual current state:\n"
+                        "- Derive concrete requirements from the objective.\n"
+                        "- For every requirement, identify evidence (file contents, command output, test results).\n"
+                        "- Treat uncertain or indirect evidence as not achieved.\n"
+                        "- Only mark complete when current evidence proves every requirement satisfied.\n\n"
+                        "Blocked audit:\n"
+                        "- Only mark blocked when the same blocker repeats for 3+ consecutive rounds.\n"
+                        "- Never mark blocked because work is hard, slow, or uncertain.\n"
+                    )
+
+                messages = [
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": request.message}
+                ]
+
+                collected_text = ""
+                max_rounds = 50
+
+                # Notify frontend: goal started (include run_id for cancel)
+                yield f"data: {json.dumps({'goal_start': {'objective': goal_objective, 'max_rounds': max_rounds, 'run_id': auto_run_id}})}\n\n"
+
+                for round_num in range(max_rounds):
+                    if goal_status != "active":
+                        break
+
+                    # Check cancel (Redis + memory) — at round start
+                    if _is_auto_cancelled(auto_run_id):
+                        goal_status = "blocked"
+                        yield f"data: {json.dumps({'goal_event': {'type': 'cancelled', 'round': round_num + 1}})}\n\n"
+                        break
+
+                    llm = router.get_provider(request.provider)
+                    tokens_used = estimate_tokens(messages)
+
+                    # Check budget
+                    if tokens_used >= token_budget:
+                        goal_status = "budget_limited"
+                        yield f"data: {json.dumps({'goal_event': {'type': 'budget_limit', 'tokens_used': tokens_used, 'token_budget': token_budget}})}\n\n"
+                        break
+
+                    # Notify frontend: round starting
+                    yield f"data: {json.dumps({'round_start': {'round': round_num + 1, 'max_rounds': max_rounds, 'tokens_used': tokens_used}})}\n\n"
+
+                    payload = {
+                        "model": request.model or llm.default_model,
+                        "messages": messages,
+                        "tools": auto_tools,
+                        "tool_choice": "auto",
+                        "temperature": 0.7,
+                        "max_tokens": 8192,
+                        "enable_thinking": False,
+                    }
+
+                    full_response = None
+                    tool_calls = None
+                    try:
+                        async with _httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.post(
+                                llm.chat_endpoint,
+                                headers={"Authorization": f"Bearer {llm.api_key}", "Content-Type": "application/json"},
+                                json=payload
+                            )
+                            # Yield control to event loop so cancel endpoint can process
+                            await _asyncio.sleep(0)
+                            data = resp.json()
+                            if "error" in data:
+                                err_msg = data["error"]
+                                yield f"data: {json.dumps({'content': f'API error: {err_msg}\n'})}\n\n"
+                                break
+                            choice = data["choices"][0]
+                            message = choice["message"]
+                            full_response = message.get("content", "")
+                            tool_calls = message.get("tool_calls")
+                    except Exception as e:
+                        yield f"data: {json.dumps({'content': f'Request failed: {e}\n'})}\n\n"
+                        break
+
+                    # Check cancel — after API call
+                    if _is_auto_cancelled(auto_run_id):
+                        goal_status = "blocked"
+                        yield f"data: {json.dumps({'goal_event': {'type': 'cancelled', 'round': round_num + 1}})}\n\n"
+                        break
+
+                    # No tool_calls -> model thinks task is done
+                    if not tool_calls:
+                        if full_response:
+                            collected_text = full_response
+                            yield f"data: {json.dumps({'content': full_response})}\n\n"
+                        goal_status = "complete"
+                        yield f"data: {json.dumps({'goal_event': {'type': 'complete', 'round': round_num + 1}})}\n\n"
+                        break
+
+                    # Emit assistant thinking text
+                    if full_response:
+                        yield f"data: {json.dumps({'content': full_response})}\n\n"
+
+                    assistant_msg = {"role": "assistant", "content": full_response or "", "tool_calls": tool_calls}
+                    messages.append(assistant_msg)
+
+                    # Execute each tool call
+                    any_tool_failed = False
+                    for tc in tool_calls:
+                        # Check cancel — between tool calls
+                        if _is_auto_cancelled(auto_run_id):
+                            goal_status = "blocked"
+                            yield f"data: {json.dumps({'goal_event': {'type': 'cancelled', 'round': round_num + 1}})}\n\n"
+                            break
+
+                        tc_id = tc["id"]
+                        func = tc["function"]
+                        tool_name = func["name"]
+                        try:
+                            tool_args = json.loads(func["arguments"])
+                            tool_input = tool_args.get("input", "")
+                        except (json.JSONDecodeError, KeyError):
+                            tool_input = func.get("arguments", "")
+
+                        # Notify frontend: tool calling
+                        yield f"data: {json.dumps({'tool_call': {'name': tool_name, 'input': str(tool_input)[:500]}})}\n\n"
+                        await _asyncio.sleep(0)  # yield to event loop
+
+                        # Execute
+                        if tool_name in tool_map:
+                            try:
+                                tool_result = tool_map[tool_name].run(str(tool_input))
+                            except Exception as te:
+                                tool_result = f"Tool error: {te}"
+                                any_tool_failed = True
+                        else:
+                            tool_result = f"Tool '{tool_name}' not available"
+                            any_tool_failed = True
+
+                        tool_result_str = str(tool_result)[:5000]
+
+                        # Notify frontend: tool result
+                        yield f"data: {json.dumps({'tool_result': {'name': tool_name, 'result': tool_result_str[:300]}})}\n\n"
+                        await _asyncio.sleep(0)  # yield to event loop
+
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": tool_result_str
+                        })
+
+                    # If cancelled during tool execution, break outer loop too
+                    if goal_status == "blocked":
+                        break
+
+                    # Track blocked state
+                    if any_tool_failed:
+                        blocked_count += 1
+                    else:
+                        blocked_count = 0
+
+                    if blocked_count >= 3:
+                        goal_status = "blocked"
+                        yield f"data: {json.dumps({'goal_event': {'type': 'blocked', 'round': round_num + 1, 'blocked_count': blocked_count}})}\n\n"
+                        break
+
+                    # Inject continuation prompt (Codex core mechanism)
+                    messages.append({
+                        "role": "system",
+                        "content": build_continuation_prompt()
+                    })
+
+                    await _asyncio.sleep(0.1)
+
+                # Final status
+                if goal_status == "active":
+                    goal_status = "complete"
+                    yield f"data: {json.dumps({'goal_event': {'type': 'complete', 'round': round_num + 1 if 'round_num' in dir() else 0}})}\n\n"
+
+                if not collected_text:
+                    collected[0] = f"Goal {goal_status}."
+                else:
+                    collected[0] = collected_text
+
+                # Cleanup cancel state
+                _cleanup_auto_run(auto_run_id)
+
+            # ========== 普通模式 ==========
+            else:
+                messages = []
+                if request.system_prompt:
+                    messages.append({"role": "system", "content": request.system_prompt})
+                
+                for msg in history:
+                    messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+                
+                if request.images:
+                    content = [{"type": "text", "text": request.message}]
+                    for img in request.images:
+                        content.append({"type": "image_url", "image_url": {"url": img}})
+                    messages.append({"role": "user", "content": content})
+                else:
+                    messages.append({"role": "user", "content": request.message})
+                
+                async for chunk in router.chat_stream(messages, provider=request.provider, model=request.model, enable_thinking=request.enable_thinking):
+                    if chunk == "[DONE]":
+                        continue
+                    if chunk.startswith('{"type": "reasoning"'):
+                        try:
+                            r = json.loads(chunk)
+                            yield f"data: {json.dumps({'reasoning': r['content']})}\n\n"
+                        except:
+                            pass
+                    else:
+                        collected[0] += chunk
+                        yield f"data: {json.dumps({'content': chunk})}\n\n"
+
+                if collected[0] and len(collected[0]) > 5 and request.suggest:
+                    try:
+                        suggest_prompt = [
+                            {"role": "system", "content": "你是一个助手。根据用户的问题和AI的回答，生成3个相关的后续问题，让用户可以继续深入了解。只输出问题，每行一个，不要编号，不要其他内容。"},
+                            {"role": "user", "content": f"用户问题：{request.message}\nAI回答：{collected[0][:500]}"}
+                        ]
+                        llm = router.get_provider(request.provider)
+                        import httpx as _httpx
+                        async with _httpx.AsyncClient(timeout=30.0) as _client:
+                            _resp = await _client.post(
+                                llm.chat_endpoint,
+                                headers={"Authorization": f"Bearer {llm.api_key}", "Content-Type": "application/json"},
+                                json={
+                                    "model": request.model or llm.default_model,
+                                    "messages": suggest_prompt,
+                                    "temperature": 0.7,
+                                    "enable_thinking": False,
+                                }
+                            )
+                            _data = _resp.json()
+                            _content = _data["choices"][0]["message"]["content"]
+                            suggestions = [s.strip() for s in _content.strip().split("\n") if s.strip() and len(s.strip()) > 3]
+                            suggestions = suggestions[:3]
+                            if suggestions:
+                                yield f"data: {json.dumps({'suggestions': suggestions})}\n\n"
+                    except Exception as e:
+                        print(f"[SUGGEST ERROR] {e}")
+
+        except GeneratorExit:
+            # Client disconnected (frontend clicked stop / closed tab)
+            if auto_run_id:
+                cancel_auto_run(auto_run_id)
         except Exception:
             pass
 
@@ -2017,6 +2343,12 @@ async def cancel_run(run_id: str):
     if cancel_workflow(run_id):
         return {"status": "ok", "message": "已发送取消信号"}
     raise HTTPException(status_code=404, detail="未找到运行中的工作流")
+
+@app.post("/api/v1/automation/cancel")
+async def cancel_automation(run_id: str):
+    if cancel_auto_run(run_id):
+        return {"status": "ok", "message": "已发送取消信号"}
+    raise HTTPException(status_code=404, detail="未找到运行中的自动化任务")
 
 @app.get("/api/v1/workflows/{workflow_id}/runs")
 async def get_workflow_runs(workflow_id: str):
